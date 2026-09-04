@@ -19,7 +19,7 @@ SETTINGS_FILE = "bot_settings.json"
 def load_settings():
     """Загружает настройки из файла, если файла нет - создаёт со значениями по умолчанию"""
     default_settings = {
-        "allowed_users": [1138809734],  # ID создателя
+        "allowed_users": [1138809734],
         "search_topics": ["Arizona RP", "Amazing RP", "Rodina RP"],
         "max_subscribers": 50000,
         "max_channels_per_topic": 20,
@@ -552,6 +552,8 @@ def handle_callback(call):
         
         try:
             new_value = int(value_str)
+            
+            # Обновляем глобальную переменную
             global MAX_SUBSCRIBERS
             MAX_SUBSCRIBERS = new_value
             settings["max_subscribers"] = new_value
