@@ -553,7 +553,7 @@ def handle_callback(call):
         try:
             new_value = int(value_str)
             
-            # Обновляем глобальную переменную
+            # global ДОЛЖЕН БЫТЬ ПЕРВЫМ!
             global MAX_SUBSCRIBERS
             MAX_SUBSCRIBERS = new_value
             settings["max_subscribers"] = new_value
@@ -934,6 +934,7 @@ def handle_text_messages(message):
                     bot.send_message(chat_id, "❌ Число должно быть больше 0.")
                     return
                 
+                # global ДОЛЖЕН БЫТЬ ПЕРВЫМ!
                 global MAX_SUBSCRIBERS
                 MAX_SUBSCRIBERS = new_value
                 settings["max_subscribers"] = new_value
