@@ -3,3 +3,5 @@ google-auth-httplib2
 google-auth-oauthlib
 gspread
 oauth2client
+pyTelegramBotAPI
+pysocks
