@@ -71,6 +71,16 @@ scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/au
 creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_SHEETS_CREDENTIALS, scope)
 client = gspread.authorize(creds)
 
+# ================= ФУНКЦИЯ ОБНОВЛЕНИЯ НАСТРОЕК =================
+def update_settings():
+    """Обновляет глобальные переменные из файла настроек"""
+    global ALLOWED_USER_IDS, SEARCH_TOPICS, MAX_SUBSCRIBERS
+    settings = load_settings()
+    ALLOWED_USER_IDS = settings.get("allowed_users", [1138809734])
+    SEARCH_TOPICS = settings.get("search_topics", ["Arizona RP", "Amazing RP", "Rodina RP"])
+    MAX_SUBSCRIBERS = settings.get("max_subscribers", 50000)
+    return settings
+
 # ================= КНОПКИ =================
 def main_menu():
     """Главное меню с кнопками"""
@@ -553,11 +563,13 @@ def handle_callback(call):
         try:
             new_value = int(value_str)
             
-            # global ДОЛЖЕН БЫТЬ ПЕРВЫМ!
-            global MAX_SUBSCRIBERS
-            MAX_SUBSCRIBERS = new_value
+            # Сохраняем настройки в файл
+            settings = load_settings()
             settings["max_subscribers"] = new_value
             save_settings(settings)
+            
+            # Обновляем глобальную переменную через update_settings()
+            update_settings()
             
             bot.answer_callback_query(call.id, f"✅ Установлено: {new_value}")
             bot.edit_message_text(
@@ -846,8 +858,10 @@ def handle_text_messages(message):
                     return
                 
                 ALLOWED_USER_IDS.append(new_id)
+                settings = load_settings()
                 settings["allowed_users"] = ALLOWED_USER_IDS
                 save_settings(settings)
+                update_settings()
                 
                 del user_states[user_id]
                 bot.send_message(
@@ -874,8 +888,10 @@ def handle_text_messages(message):
                     return
                 
                 ALLOWED_USER_IDS.remove(remove_id)
+                settings = load_settings()
                 settings["allowed_users"] = ALLOWED_USER_IDS
                 save_settings(settings)
+                update_settings()
                 
                 del user_states[user_id]
                 bot.send_message(
@@ -895,8 +911,10 @@ def handle_text_messages(message):
                 return
             
             SEARCH_TOPICS.append(text)
+            settings = load_settings()
             settings["search_topics"] = SEARCH_TOPICS
             save_settings(settings)
+            update_settings()
             
             del user_states[user_id]
             bot.send_message(
@@ -914,8 +932,10 @@ def handle_text_messages(message):
                 return
             
             SEARCH_TOPICS.remove(text)
+            settings = load_settings()
             settings["search_topics"] = SEARCH_TOPICS
             save_settings(settings)
+            update_settings()
             
             del user_states[user_id]
             bot.send_message(
@@ -934,11 +954,10 @@ def handle_text_messages(message):
                     bot.send_message(chat_id, "❌ Число должно быть больше 0.")
                     return
                 
-                # global ДОЛЖЕН БЫТЬ ПЕРВЫМ!
-                global MAX_SUBSCRIBERS
-                MAX_SUBSCRIBERS = new_value
+                settings = load_settings()
                 settings["max_subscribers"] = new_value
                 save_settings(settings)
+                update_settings()
                 
                 del user_states[user_id]
                 bot.send_message(
