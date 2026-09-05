@@ -422,34 +422,85 @@ def analyze_channel_deep(channel_data):
     
     return channel_data
 
+# ================= ФОРМАТИРОВАНИЕ ТАБЛИЦ =================
+def format_sheet(sheet):
+    """Форматирует основную таблицу"""
+    try:
+        # Устанавливаем ширину колонок
+        sheet.set_column_widths([
+            ("A", "A", 300),
+            ("B", "B", 350),
+            ("C", "C", 120),
+            ("D", "D", 150),
+            ("E", "E", 350),
+            ("F", "F", 120),
+            ("G", "G", 120),
+            ("H", "H", 150),
+            ("I", "I", 150),
+            ("J", "J", 100)
+        ])
+        
+        # Форматируем заголовки
+        sheet.format('A1:J1', {
+            "backgroundColor": {"red": 0.2, "green": 0.4, "blue": 0.6},
+            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+            "horizontalAlignment": "CENTER"
+        })
+        
+        # Автоматическая подгонка высоты строк
+        sheet.format('A1:J', {
+            "wrapStrategy": "WRAP"
+        })
+        
+    except Exception as e:
+        logger.error(f"Ошибка форматирования основной таблицы: {e}")
+
+def format_contacts_sheet(sheet):
+    """Форматирует лист с контактами"""
+    try:
+        # Устанавливаем ширину колонок
+        sheet.set_column_widths([
+            ("A", "A", 300),
+            ("B", "B", 350),
+            ("C", "C", 250),
+            ("D", "D", 200),
+            ("E", "E", 200),
+            ("F", "F", 100)
+        ])
+        
+        # Форматируем заголовки
+        sheet.format('A1:F1', {
+            "backgroundColor": {"red": 0.1, "green": 0.6, "blue": 0.1},
+            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+            "horizontalAlignment": "CENTER"
+        })
+        
+        # Автоматическая подгонка высоты строк
+        sheet.format('A1:F', {
+            "wrapStrategy": "WRAP"
+        })
+        
+        # Подсвечиваем строки с email (зелёным фоном)
+        all_data = sheet.get_all_values()
+        for i in range(2, len(all_data) + 1):
+            try:
+                email = sheet.cell(i, 3).value
+                if email:
+                    sheet.format(f'A{i}:F{i}', {
+                        "backgroundColor": {"red": 0.85, "green": 0.95, "blue": 0.75}
+                    })
+            except:
+                pass
+        
+    except Exception as e:
+        logger.error(f"Ошибка форматирования листа контактов: {e}")
+
 # ================= РАБОТА С GOOGLE SHEETS =================
 def get_workbook():
     try:
         return client.open(SPREADSHEET_NAME)
     except:
         return None
-
-def format_sheet(sheet):
-    """Форматирует таблицу"""
-    try:
-        sheet.set_column_width(1, 300)
-        sheet.set_column_width(2, 350)
-        sheet.set_column_width(3, 120)
-        sheet.set_column_width(4, 150)
-        sheet.set_column_width(5, 350)
-        sheet.set_column_width(6, 120)
-        sheet.set_column_width(7, 120)
-        sheet.set_column_width(8, 150)
-        sheet.set_column_width(9, 150)
-        sheet.set_column_width(10, 100)
-        
-        sheet.format('A1:J1', {
-            "backgroundColor": {"red": 0.2, "green": 0.4, "blue": 0.6},
-            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
-            "horizontalAlignment": "CENTER"
-        })
-    except Exception as e:
-        logger.error(f"Ошибка форматирования: {e}")
 
 def save_to_sheets(workbook, channels):
     try:
@@ -496,63 +547,46 @@ def save_to_sheets(workbook, channels):
     
     return new_rows
 
-def refresh_sheet(chat_id):
-    """Полностью пересоздаёт таблицу из данных channels_db.json"""
+def update_contacts_sheet(workbook, channels_db):
+    """Обновляет лист с контактами (без дубликатов)"""
     try:
-        bot.send_message(chat_id, "🔄 Обновляю таблицу...", reply_markup=main_keyboard())
-        
-        workbook = get_workbook()
-        if not workbook:
-            bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
-            return
-        
-        channels_db = load_channels_db()
-        
-        if not channels_db:
-            bot.send_message(chat_id, "⚠️ Нет данных для обновления. Сначала запустите парсер.", reply_markup=main_keyboard())
-            return
-        
-        # ========== 1. ОБНОВЛЯЕМ ЛИСТ "БАЗА ДАННЫХ" ==========
-        try:
-            main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
-            all_data = main_sheet.get_all_values()
-            if len(all_data) > 1:
-                main_sheet.delete_rows(2, len(all_data) - 1)
-        except:
-            main_sheet = workbook.add_worksheet(title=MAIN_SHEET_NAME, rows=1, cols=10)
-            main_sheet.append_row([
-                "Название канала", "Ссылка", "Подписчики", "Тема",
-                "Найдено в видео", "ER (%)", "Дней неактивности",
-                "Telegram", "VK", "Скор"
-            ])
-        
-        rows_to_add = []
+        # Собираем все контакты из базы
+        contacts_dict = {}
         for ch_id, data in channels_db.items():
+            url = data.get("url", "")
+            if not url:
+                continue
             contacts = data.get("contacts", {})
-            rows_to_add.append([
-                data.get("name", ""),
-                data.get("url", ""),
-                data.get("subscribers", 0),
-                data.get("topic", ""),
-                data.get("video_title", "")[:50],
-                data.get("engagement_rate", 0),
-                data.get("days_inactive", 999),
-                contacts.get("telegram", ""),
-                contacts.get("vk", ""),
-                data.get("score", 0)
-            ])
+            if url not in contacts_dict:
+                contacts_dict[url] = {
+                    "name": data.get("name", ""),
+                    "url": url,
+                    "email": contacts.get("email", ""),
+                    "telegram": contacts.get("telegram", ""),
+                    "vk": contacts.get("vk", ""),
+                    "score": data.get("score", 0)
+                }
+            else:
+                existing = contacts_dict[url]
+                if contacts.get("email") and not existing["email"]:
+                    existing["email"] = contacts["email"]
+                if contacts.get("telegram") and not existing["telegram"]:
+                    existing["telegram"] = contacts["telegram"]
+                if contacts.get("vk") and not existing["vk"]:
+                    existing["vk"] = contacts["vk"]
+                if data.get("score", 0) > existing["score"]:
+                    existing["score"] = data["score"]
         
-        rows_to_add.sort(key=lambda x: x[9] if x[9] else 0, reverse=True)
+        # Фильтруем каналы с контактами
+        contacts_list = []
+        for url, data in contacts_dict.items():
+            has_contact = data["email"] or data["telegram"] or data["vk"]
+            if has_contact and data["score"] >= MIN_SCORE_FOR_TOP:
+                contacts_list.append(data)
         
-        for row in rows_to_add:
-            try:
-                main_sheet.append_row(row)
-            except:
-                pass
+        contacts_list.sort(key=lambda x: x["score"], reverse=True)
         
-        format_sheet(main_sheet)
-        
-        # ========== 2. ОБНОВЛЯЕМ ЛИСТ "КОНТАКТЫ" ==========
+        # Создаём или очищаем лист
         try:
             contacts_sheet = workbook.worksheet(CONTACTS_SHEET_NAME)
             all_data = contacts_sheet.get_all_values()
@@ -564,119 +598,25 @@ def refresh_sheet(chat_id):
                 "Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"
             ])
         
-        contacts_added = 0
-        for ch_id, data in channels_db.items():
-            contacts = data.get("contacts", {})
-            has_contact = contacts.get("email") or contacts.get("telegram") or contacts.get("vk")
-            
-            if has_contact and data.get("score", 0) >= MIN_SCORE_FOR_TOP:
-                try:
-                    contacts_sheet.append_row([
-                        data.get("name", ""),
-                        data.get("url", ""),
-                        contacts.get("email", ""),
-                        contacts.get("telegram", ""),
-                        contacts.get("vk", ""),
-                        data.get("score", 0)
-                    ])
-                    contacts_added += 1
-                except:
-                    pass
-        
-        contacts_sheet.format('A1:F1', {
-            "backgroundColor": {"red": 0.1, "green": 0.6, "blue": 0.1},
-            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
-            "horizontalAlignment": "CENTER"
-        })
-        
-        contacts_data = contacts_sheet.get_all_values()
-        for i in range(2, len(contacts_data) + 1):
+        # Заполняем
+        for ch in contacts_list:
             try:
-                email = contacts_sheet.cell(i, 3).value
-                if email:
-                    contacts_sheet.format(f'A{i}:F{i}', {
-                        "backgroundColor": {"red": 0.9, "green": 1, "blue": 0.8}
-                    })
+                contacts_sheet.append_row([
+                    ch["name"],
+                    ch["url"],
+                    ch["email"],
+                    ch["telegram"],
+                    ch["vk"],
+                    ch["score"]
+                ])
             except:
                 pass
         
-        contacts_sheet.set_column_width(1, 300)
-        contacts_sheet.set_column_width(2, 350)
-        contacts_sheet.set_column_width(3, 250)
-        contacts_sheet.set_column_width(4, 200)
-        contacts_sheet.set_column_width(5, 200)
-        contacts_sheet.set_column_width(6, 100)
+        # Форматируем
+        format_contacts_sheet(contacts_sheet)
         
-        msg = f"✅ **Таблица обновлена!**\n\n"
-        msg += f"📊 Всего каналов: **{len(rows_to_add)}**\n"
-        msg += f"📧 Каналов с контактами: **{contacts_added}**\n\n"
-        msg += f"📋 Лист «{MAIN_SHEET_NAME}» обновлён\n"
-        msg += f"📋 Лист «{CONTACTS_SHEET_NAME}» обновлён\n\n"
-        msg += f"🔗 {workbook.url}"
+        return len(contacts_list)
         
-        bot.send_message(chat_id, msg, parse_mode='Markdown', reply_markup=main_keyboard())
-        
-    except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка обновления: {str(e)}", reply_markup=main_keyboard())
-
-def update_contacts_sheet(workbook, channels_db):
-    try:
-        try:
-            contacts_sheet = workbook.worksheet(CONTACTS_SHEET_NAME)
-        except:
-            contacts_sheet = workbook.add_worksheet(title=CONTACTS_SHEET_NAME, rows=1, cols=6)
-            contacts_sheet.append_row([
-                "Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"
-            ])
-        
-        all_data = contacts_sheet.get_all_values()
-        if len(all_data) > 1:
-            contacts_sheet.delete_rows(2, len(all_data) - 1)
-        
-        added = 0
-        for ch_id, data in channels_db.items():
-            contacts = data.get("contacts", {})
-            has_contact = contacts.get("email") or contacts.get("telegram") or contacts.get("vk")
-            
-            if has_contact and data.get("score", 0) >= MIN_SCORE_FOR_TOP:
-                try:
-                    contacts_sheet.append_row([
-                        data.get("name", ""),
-                        data.get("url", ""),
-                        contacts.get("email", ""),
-                        contacts.get("telegram", ""),
-                        contacts.get("vk", ""),
-                        data.get("score", 0)
-                    ])
-                    added += 1
-                except:
-                    pass
-        
-        contacts_sheet.format('A1:F1', {
-            "backgroundColor": {"red": 0.1, "green": 0.6, "blue": 0.1},
-            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
-            "horizontalAlignment": "CENTER"
-        })
-        
-        contacts_data = contacts_sheet.get_all_values()
-        for i in range(2, len(contacts_data) + 1):
-            try:
-                email = contacts_sheet.cell(i, 3).value
-                if email:
-                    contacts_sheet.format(f'A{i}:F{i}', {
-                        "backgroundColor": {"red": 0.9, "green": 1, "blue": 0.8}
-                    })
-            except:
-                pass
-        
-        contacts_sheet.set_column_width(1, 300)
-        contacts_sheet.set_column_width(2, 350)
-        contacts_sheet.set_column_width(3, 250)
-        contacts_sheet.set_column_width(4, 200)
-        contacts_sheet.set_column_width(5, 200)
-        contacts_sheet.set_column_width(6, 100)
-        
-        return added
     except Exception as e:
         logger.error(f"Ошибка обновления листа контактов: {e}")
         return 0
@@ -727,6 +667,158 @@ def update_sheet_with_analysis(workbook, channels_db):
                 
     except Exception as e:
         logger.error(f"Ошибка обновления таблицы: {e}")
+
+def refresh_sheet(chat_id):
+    """Полностью пересоздаёт таблицу из данных channels_db.json"""
+    try:
+        bot.send_message(chat_id, "🔄 Обновляю таблицу...", reply_markup=main_keyboard())
+        
+        workbook = get_workbook()
+        if not workbook:
+            bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
+            return
+        
+        channels_db = load_channels_db()
+        
+        if not channels_db:
+            bot.send_message(chat_id, "⚠️ Нет данных для обновления. Сначала запустите парсер.", reply_markup=main_keyboard())
+            return
+        
+        # ========== 1. ОБНОВЛЯЕМ ЛИСТ "БАЗА ДАННЫХ" ==========
+        try:
+            main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
+            all_data = main_sheet.get_all_values()
+            if len(all_data) > 1:
+                main_sheet.delete_rows(2, len(all_data) - 1)
+        except:
+            main_sheet = workbook.add_worksheet(title=MAIN_SHEET_NAME, rows=1, cols=10)
+            main_sheet.append_row([
+                "Название канала", "Ссылка", "Подписчики", "Тема",
+                "Найдено в видео", "ER (%)", "Дней неактивности",
+                "Telegram", "VK", "Скор"
+            ])
+        
+        # Собираем все уникальные каналы из базы
+        all_channels = []
+        seen_urls = set()
+        for ch_id, data in channels_db.items():
+            url = data.get("url", "")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                contacts = data.get("contacts", {})
+                all_channels.append({
+                    "name": data.get("name", ""),
+                    "url": url,
+                    "subscribers": data.get("subscribers", 0),
+                    "topic": data.get("topic", ""),
+                    "video_title": data.get("video_title", "")[:50],
+                    "engagement_rate": data.get("engagement_rate", 0),
+                    "days_inactive": data.get("days_inactive", 999),
+                    "telegram": contacts.get("telegram", ""),
+                    "vk": contacts.get("vk", ""),
+                    "email": contacts.get("email", ""),
+                    "score": data.get("score", 0)
+                })
+        
+        # Сортируем по скору (по убыванию)
+        all_channels.sort(key=lambda x: x["score"], reverse=True)
+        
+        # Заполняем таблицу
+        for ch in all_channels:
+            try:
+                main_sheet.append_row([
+                    ch["name"],
+                    ch["url"],
+                    ch["subscribers"],
+                    ch["topic"],
+                    ch["video_title"],
+                    ch["engagement_rate"],
+                    ch["days_inactive"],
+                    ch["telegram"],
+                    ch["vk"],
+                    ch["score"]
+                ])
+            except Exception as e:
+                logger.error(f"Ошибка добавления строки: {e}")
+        
+        # Применяем форматирование
+        format_sheet(main_sheet)
+        
+        # ========== 2. ОБНОВЛЯЕМ ЛИСТ "КОНТАКТЫ" ==========
+        # Собираем все контакты из всех каналов (без дубликатов по URL)
+        contacts_dict = {}
+        for ch in all_channels:
+            url = ch["url"]
+            if url not in contacts_dict:
+                contacts_dict[url] = {
+                    "name": ch["name"],
+                    "url": url,
+                    "email": ch.get("email", ""),
+                    "telegram": ch.get("telegram", ""),
+                    "vk": ch.get("vk", ""),
+                    "score": ch.get("score", 0)
+                }
+            else:
+                existing = contacts_dict[url]
+                if ch.get("email") and not existing["email"]:
+                    existing["email"] = ch["email"]
+                if ch.get("telegram") and not existing["telegram"]:
+                    existing["telegram"] = ch["telegram"]
+                if ch.get("vk") and not existing["vk"]:
+                    existing["vk"] = ch["vk"]
+                if ch.get("score", 0) > existing["score"]:
+                    existing["score"] = ch["score"]
+        
+        # Фильтруем только те, у которых есть хоть один контакт
+        contacts_list = []
+        for url, data in contacts_dict.items():
+            has_contact = data["email"] or data["telegram"] or data["vk"]
+            if has_contact and data["score"] >= MIN_SCORE_FOR_TOP:
+                contacts_list.append(data)
+        
+        # Сортируем по скору
+        contacts_list.sort(key=lambda x: x["score"], reverse=True)
+        
+        # Создаём или очищаем лист контактов
+        try:
+            contacts_sheet = workbook.worksheet(CONTACTS_SHEET_NAME)
+            all_data = contacts_sheet.get_all_values()
+            if len(all_data) > 1:
+                contacts_sheet.delete_rows(2, len(all_data) - 1)
+        except:
+            contacts_sheet = workbook.add_worksheet(title=CONTACTS_SHEET_NAME, rows=1, cols=6)
+            contacts_sheet.append_row([
+                "Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"
+            ])
+        
+        # Заполняем лист контактов
+        for ch in contacts_list:
+            try:
+                contacts_sheet.append_row([
+                    ch["name"],
+                    ch["url"],
+                    ch["email"],
+                    ch["telegram"],
+                    ch["vk"],
+                    ch["score"]
+                ])
+            except Exception as e:
+                logger.error(f"Ошибка добавления контакта: {e}")
+        
+        # Форматируем лист контактов
+        format_contacts_sheet(contacts_sheet)
+        
+        msg = f"✅ **Таблица обновлена!**\n\n"
+        msg += f"📊 Всего каналов: **{len(all_channels)}**\n"
+        msg += f"📧 Каналов с контактами: **{len(contacts_list)}**\n\n"
+        msg += f"📋 Лист «{MAIN_SHEET_NAME}» обновлён\n"
+        msg += f"📋 Лист «{CONTACTS_SHEET_NAME}» обновлён\n\n"
+        msg += f"🔗 {workbook.url}"
+        
+        bot.send_message(chat_id, msg, parse_mode='Markdown', reply_markup=main_keyboard())
+        
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ошибка обновления: {str(e)}", reply_markup=main_keyboard())
 
 # ================= ПРОВЕРКА ДОСТУПА =================
 def is_admin(user_id):
