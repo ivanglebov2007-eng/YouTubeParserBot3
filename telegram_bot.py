@@ -23,7 +23,7 @@ MIN_SCORE_FOR_TOP = 65
 # ================= НАСТРОЙКИ GOOGLE =================
 GOOGLE_SHEETS_CREDENTIALS = "credentials.json"
 SPREADSHEET_NAME = "YouTube Каналы RP (из видео)"
-MAIN_SHEET_NAME = "База данных"
+MAIN_SHEET_NAME = "База данных (Новая)"   # НОВОЕ ИМЯ!
 CONTACTS_SHEET_NAME = "Контакты"
 
 # ================= ФАЙЛЫ ДЛЯ ХРАНЕНИЯ =================
@@ -474,90 +474,31 @@ def format_contacts_sheet(sheet):
     except Exception as e:
         logger.error(f"Ошибка форматирования листа контактов: {e}")
 
-# ================= РАБОТА С GOOGLE SHEETS =================
-def get_workbook():
+# ================= НОВАЯ ФУНКЦИЯ: ПЕРЕНОС ДАННЫХ =================
+def migrate_data_to_new_main(chat_id):
+    """Переносит данные из всех листов в новую базу (без дубликатов)"""
     try:
-        return client.open(SPREADSHEET_NAME)
-    except:
-        return None
-
-def save_to_sheets(workbook, channels):
-    try:
-        main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
-    except:
-        main_sheet = workbook.add_worksheet(title=MAIN_SHEET_NAME, rows=1, cols=10)
-        main_sheet.append_row([
-            "Название канала", "Ссылка", "Подписчики", "Тема",
-            "Найдено в видео", "ER (%)", "Дней неактивности",
-            "Telegram", "VK", "Скор"
-        ])
-        format_sheet(main_sheet)
-    
-    existing_urls = set()
-    all_data = main_sheet.get_all_values()
-    for row in all_data[1:]:
-        if len(row) > 1 and row[1]:
-            existing_urls.add(row[1].strip())
-    
-    new_rows = []
-    for ch in channels:
-        if ch["url"] not in existing_urls:
-            contacts = ch.get("contacts", {})
-            new_rows.append([
-                ch["name"],
-                ch["url"],
-                ch["subscribers"],
-                ch["topic"],
-                ch.get("video_title", "")[:50],
-                ch.get("engagement_rate", 0),
-                ch.get("days_inactive", 999),
-                contacts.get("telegram", ""),
-                contacts.get("vk", ""),
-                ch.get("score", 0)
-            ])
-    
-    if new_rows:
-        for row in new_rows:
-            try:
-                main_sheet.append_row(row)
-            except:
-                pass
-        format_sheet(main_sheet)
-    
-    return new_rows
-
-def refresh_sheet(chat_id):
-    """Полностью пересоздаёт таблицу из данных всех листов"""
-    try:
-        bot.send_message(chat_id, "🔄 Обновляю таблицу...", reply_markup=main_keyboard())
-        
         workbook = get_workbook()
         if not workbook:
             bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
             return
         
-        # ========== 1. СОБИРАЕМ ВСЕ КАНАЛЫ СО ВСЕХ ЛИСТОВ ==========
-        all_channels_dict = {}
+        bot.send_message(chat_id, "🔄 Переношу данные в новую базу...", reply_markup=main_keyboard())
+        
         all_worksheets = workbook.worksheets()
-        processed_sheets = []
+        all_channels_dict = {}
         
         for ws in all_worksheets:
-            sheet_title = ws.title
-            
-            # Пропускаем лист с контактами
-            if sheet_title == CONTACTS_SHEET_NAME:
+            if ws.title == MAIN_SHEET_NAME or ws.title == CONTACTS_SHEET_NAME:
                 continue
             
             data = ws.get_all_values()
             if len(data) <= 1:
                 continue
             
-            processed_sheets.append(sheet_title)
             headers = data[0]
-            
-            # Определяем индексы колонок
-            name_idx = None
             url_idx = None
+            name_idx = None
             subs_idx = None
             topic_idx = None
             video_idx = None
@@ -565,8 +506,8 @@ def refresh_sheet(chat_id):
             days_idx = None
             tg_idx = None
             vk_idx = None
-            score_idx = None
             email_idx = None
+            score_idx = None
             
             for i, h in enumerate(headers):
                 h_lower = str(h).lower().strip()
@@ -593,11 +534,9 @@ def refresh_sheet(chat_id):
                 elif 'email' in h_lower:
                     email_idx = i
             
-            # Если нет ссылки или названия — пропускаем лист
             if url_idx is None:
                 continue
             
-            # Проходим по строкам
             for row in data[1:]:
                 if len(row) <= url_idx:
                     continue
@@ -657,7 +596,6 @@ def refresh_sheet(chat_id):
                     'score': score
                 }
                 
-                # Объединяем данные по URL
                 if url in all_channels_dict:
                     existing = all_channels_dict[url]
                     if tg and not existing.get('telegram'):
@@ -677,42 +615,124 @@ def refresh_sheet(chat_id):
                 else:
                     all_channels_dict[url] = channel_data
         
+        # Сохраняем в channels_db.json
+        for url, data in all_channels_dict.items():
+            # Преобразуем в формат для channels_db
+            channels_db = load_channels_db()
+            # Ищем channel_id из url
+            channel_id = url.split("/")[-1]
+            if channel_id not in channels_db:
+                channels_db[channel_id] = {
+                    "channel_id": channel_id,
+                    "name": data.get('name', ''),
+                    "url": url,
+                    "subscribers": data.get('subscribers', 0),
+                    "topic": data.get('topic', ''),
+                    "video_title": data.get('video_title', ''),
+                    "engagement_rate": data.get('engagement_rate', 0),
+                    "days_inactive": data.get('days_inactive', 999),
+                    "contacts": {
+                        "telegram": data.get('telegram', ''),
+                        "vk": data.get('vk', ''),
+                        "email": data.get('email', '')
+                    },
+                    "score": data.get('score', 0),
+                    "analyzed": True
+                }
+            save_channels_db(channels_db)
+        
+        bot.send_message(chat_id, f"✅ Перенос завершён! Перенесено **{len(all_channels_dict)}** уникальных каналов.", parse_mode='Markdown', reply_markup=main_keyboard())
+        return all_channels_dict
+        
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ошибка миграции: {str(e)}", reply_markup=main_keyboard())
+        return None
+
+# ================= ОСТАЛЬНЫЕ ФУНКЦИИ (СОКРАЩЕННЫЕ) =================
+def get_workbook():
+    try:
+        return client.open(SPREADSHEET_NAME)
+    except:
+        return None
+
+def save_to_sheets(workbook, channels):
+    try:
+        main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
+    except:
+        main_sheet = workbook.add_worksheet(title=MAIN_SHEET_NAME, rows=1, cols=10)
+        main_sheet.append_row([
+            "Название канала", "Ссылка", "Подписчики", "Тема",
+            "Найдено в видео", "ER (%)", "Дней неактивности",
+            "Telegram", "VK", "Скор"
+        ])
+        format_sheet(main_sheet)
+    
+    existing_urls = set()
+    all_data = main_sheet.get_all_values()
+    for row in all_data[1:]:
+        if len(row) > 1 and row[1]:
+            existing_urls.add(row[1].strip())
+    
+    new_rows = []
+    for ch in channels:
+        if ch["url"] not in existing_urls:
+            contacts = ch.get("contacts", {})
+            new_rows.append([
+                ch["name"],
+                ch["url"],
+                ch["subscribers"],
+                ch["topic"],
+                ch.get("video_title", "")[:50],
+                ch.get("engagement_rate", 0),
+                ch.get("days_inactive", 999),
+                contacts.get("telegram", ""),
+                contacts.get("vk", ""),
+                ch.get("score", 0)
+            ])
+    
+    if new_rows:
+        for row in new_rows:
+            try:
+                main_sheet.append_row(row)
+            except:
+                pass
+        format_sheet(main_sheet)
+    
+    return new_rows
+
+def refresh_sheet(chat_id):
+    try:
+        bot.send_message(chat_id, "🔄 Обновляю таблицу...", reply_markup=main_keyboard())
+        
+        workbook = get_workbook()
+        if not workbook:
+            bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
+            return
+        
+        # Сначала мигрируем данные
+        all_channels_dict = migrate_data_to_new_main(chat_id)
         if not all_channels_dict:
-            msg = "⚠️ Нет данных для обновления.\n\n"
-            if processed_sheets:
-                msg += f"📋 Обработаны листы: {', '.join(processed_sheets)}\n"
-                msg += "❌ Но в них не найдены каналы.\n\n"
-                msg += "📌 Убедитесь, что в таблице есть:\n"
-                msg += "• Колонка со ссылкой на канал (например, 'Ссылка', 'url')\n"
-                msg += "• Хотя бы одна строка с данными"
-            else:
-                msg += "📋 Нет листов с данными.\n\n"
-                msg += "📌 Сначала запустите парсер."
-            
-            bot.send_message(chat_id, msg, reply_markup=main_keyboard())
             return
         
         all_channels = list(all_channels_dict.values())
         all_channels.sort(key=lambda x: x.get('score', 0), reverse=True)
         
-        # ========== 2. ОБНОВЛЯЕМ ЛИСТ "БАЗА ДАННЫХ" ==========
+        # Создаём новый лист
         try:
             main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
         except:
             main_sheet = workbook.add_worksheet(title=MAIN_SHEET_NAME, rows=1, cols=10)
         
-        # ПОЛНОСТЬЮ ОЧИЩАЕМ ЛИСТ
+        # Очищаем
         all_data = main_sheet.get_all_values()
         if len(all_data) > 0:
             main_sheet.delete_rows(1, len(all_data))
         
-        # Добавляем заголовки
         headers = ["Название канала", "Ссылка", "Подписчики", "Тема",
                    "Найдено в видео", "ER (%)", "Дней неактивности",
                    "Telegram", "VK", "Скор"]
         main_sheet.append_row(headers)
         
-        # Заполняем данными
         for ch in all_channels:
             try:
                 main_sheet.append_row([
@@ -732,15 +752,12 @@ def refresh_sheet(chat_id):
         
         format_sheet(main_sheet)
         
-        # ========== 3. ОБНОВЛЯЕМ ЛИСТ "КОНТАКТЫ" ==========
-        # Собираем каналы с контактами
+        # Обновляем Контакты
         contacts_list = []
         seen_urls = set()
-        
         for ch in all_channels:
             has_contact = ch.get('email') or ch.get('telegram') or ch.get('vk')
             url = ch.get('url', '')
-            
             if has_contact and ch.get('score', 0) >= MIN_SCORE_FOR_TOP and url and url not in seen_urls:
                 seen_urls.add(url)
                 contacts_list.append({
@@ -759,7 +776,6 @@ def refresh_sheet(chat_id):
         except:
             contacts_sheet = workbook.add_worksheet(title=CONTACTS_SHEET_NAME, rows=1, cols=6)
         
-        # ПОЛНОСТЬЮ ОЧИЩАЕМ ЛИСТ КОНТАКТОВ
         all_data = contacts_sheet.get_all_values()
         if len(all_data) > 0:
             contacts_sheet.delete_rows(1, len(all_data))
@@ -767,7 +783,6 @@ def refresh_sheet(chat_id):
         contacts_headers = ["Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"]
         contacts_sheet.append_row(contacts_headers)
         
-        # Заполняем контактами
         for ch in contacts_list:
             try:
                 contacts_sheet.append_row([
@@ -783,22 +798,19 @@ def refresh_sheet(chat_id):
         
         format_contacts_sheet(contacts_sheet)
         
-        # ========== 4. ОТЧЁТ ==========
         msg = f"✅ **Таблица обновлена!**\n\n"
         msg += f"📊 Всего каналов: **{len(all_channels)}**\n"
         msg += f"📧 Каналов с контактами: **{len(contacts_list)}**\n\n"
-        
-        if processed_sheets:
-            msg += f"📋 Обработаны листы: {', '.join(processed_sheets)}\n\n"
-        
-        msg += f"📋 Лист «{MAIN_SHEET_NAME}» обновлён\n"
-        msg += f"📋 Лист «{CONTACTS_SHEET_NAME}» обновлён\n\n"
+        msg += f"📋 Новый лист «{MAIN_SHEET_NAME}» создан\n"
+        msg += f"📋 Лист «Контакты» обновлён\n\n"
         msg += f"🔗 {workbook.url}"
         
         bot.send_message(chat_id, msg, parse_mode='Markdown', reply_markup=main_keyboard())
         
     except Exception as e:
         bot.send_message(chat_id, f"❌ Ошибка обновления: {str(e)}", reply_markup=main_keyboard())
+
+# ... (остальные функции обработчиков и запуска остаются без изменений)
 
 def update_contacts_sheet(workbook, channels_db):
     try:
