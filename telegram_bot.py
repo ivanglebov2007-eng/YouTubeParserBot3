@@ -424,59 +424,43 @@ def analyze_channel_deep(channel_data):
 
 # ================= ФОРМАТИРОВАНИЕ ТАБЛИЦ =================
 def format_sheet(sheet):
-    """Форматирует основную таблицу"""
     try:
-        # Устанавливаем ширину колонок (по одной)
-        sheet.set_column_width(1, 300)   # A - Название канала
-        sheet.set_column_width(2, 350)   # B - Ссылка
-        sheet.set_column_width(3, 120)   # C - Подписчики
-        sheet.set_column_width(4, 150)   # D - Тема
-        sheet.set_column_width(5, 350)   # E - Найдено в видео
-        sheet.set_column_width(6, 120)   # F - ER (%)
-        sheet.set_column_width(7, 120)   # G - Дней неактивности
-        sheet.set_column_width(8, 150)   # H - Telegram
-        sheet.set_column_width(9, 150)   # I - VK
-        sheet.set_column_width(10, 100)  # J - Скор
+        sheet.set_column_width(1, 300)
+        sheet.set_column_width(2, 350)
+        sheet.set_column_width(3, 120)
+        sheet.set_column_width(4, 150)
+        sheet.set_column_width(5, 350)
+        sheet.set_column_width(6, 120)
+        sheet.set_column_width(7, 120)
+        sheet.set_column_width(8, 150)
+        sheet.set_column_width(9, 150)
+        sheet.set_column_width(10, 100)
         
-        # Форматируем заголовки
         sheet.format('A1:J1', {
             "backgroundColor": {"red": 0.2, "green": 0.4, "blue": 0.6},
             "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
             "horizontalAlignment": "CENTER"
         })
-        
-        # Автоматическая подгонка высоты строк (перенос текста)
-        sheet.format('A2:J', {
-            "wrapStrategy": "WRAP"
-        })
-        
+        sheet.format('A2:J', {"wrapStrategy": "WRAP"})
     except Exception as e:
         logger.error(f"Ошибка форматирования основной таблицы: {e}")
 
 def format_contacts_sheet(sheet):
-    """Форматирует лист с контактами"""
     try:
-        # Устанавливаем ширину колонок
-        sheet.set_column_width(1, 300)   # A - Название канала
-        sheet.set_column_width(2, 350)   # B - Ссылка
-        sheet.set_column_width(3, 250)   # C - Email
-        sheet.set_column_width(4, 200)   # D - Telegram
-        sheet.set_column_width(5, 200)   # E - VK
-        sheet.set_column_width(6, 100)   # F - Скор
+        sheet.set_column_width(1, 300)
+        sheet.set_column_width(2, 350)
+        sheet.set_column_width(3, 250)
+        sheet.set_column_width(4, 200)
+        sheet.set_column_width(5, 200)
+        sheet.set_column_width(6, 100)
         
-        # Форматируем заголовки
         sheet.format('A1:F1', {
             "backgroundColor": {"red": 0.1, "green": 0.6, "blue": 0.1},
             "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
             "horizontalAlignment": "CENTER"
         })
+        sheet.format('A2:F', {"wrapStrategy": "WRAP"})
         
-        # Автоматическая подгонка высоты строк
-        sheet.format('A2:F', {
-            "wrapStrategy": "WRAP"
-        })
-        
-        # Подсвечиваем строки с email (зелёным фоном)
         all_data = sheet.get_all_values()
         for i in range(2, len(all_data) + 1):
             try:
@@ -487,7 +471,6 @@ def format_contacts_sheet(sheet):
                     })
             except:
                 pass
-        
     except Exception as e:
         logger.error(f"Ошибка форматирования листа контактов: {e}")
 
@@ -554,112 +537,176 @@ def refresh_sheet(chat_id):
             return
         
         # ========== 1. СОБИРАЕМ ВСЕ КАНАЛЫ СО ВСЕХ ЛИСТОВ ==========
-        all_channels_dict = {}  # {url: channel_data}
+        all_channels_dict = {}
         all_worksheets = workbook.worksheets()
+        processed_sheets = []
         
         for ws in all_worksheets:
-            # Пропускаем лист с контактами (чтобы не зацикливаться)
-            if ws.title == CONTACTS_SHEET_NAME:
+            sheet_title = ws.title
+            
+            # Пропускаем лист с контактами
+            if sheet_title == CONTACTS_SHEET_NAME:
                 continue
             
             data = ws.get_all_values()
             if len(data) <= 1:
                 continue
             
-            # Определяем колонки по заголовкам
+            processed_sheets.append(sheet_title)
             headers = data[0]
-            col_map = {}
-            for i, h in enumerate(headers):
-                h_lower = h.lower()
-                if 'название' in h_lower or 'канал' in h_lower:
-                    col_map['name'] = i
-                elif 'ссылка' in h_lower:
-                    col_map['url'] = i
-                elif 'подписчик' in h_lower or 'подписки' in h_lower:
-                    col_map['subscribers'] = i
-                elif 'тема' in h_lower:
-                    col_map['topic'] = i
-                elif 'видео' in h_lower:
-                    col_map['video'] = i
-                elif 'er' in h_lower:
-                    col_map['er'] = i
-                elif 'дней' in h_lower or 'неактивн' in h_lower:
-                    col_map['days'] = i
-                elif 'telegram' in h_lower or 'tg' in h_lower:
-                    col_map['telegram'] = i
-                elif 'vk' in h_lower:
-                    col_map['vk'] = i
-                elif 'скор' in h_lower or 'score' in h_lower:
-                    col_map['score'] = i
-                elif 'email' in h_lower:
-                    col_map['email'] = i
             
-            # Если нет ссылки или названия — пропускаем
-            if 'url' not in col_map or 'name' not in col_map:
+            # Определяем индексы колонок
+            name_idx = None
+            url_idx = None
+            subs_idx = None
+            topic_idx = None
+            video_idx = None
+            er_idx = None
+            days_idx = None
+            tg_idx = None
+            vk_idx = None
+            score_idx = None
+            email_idx = None
+            
+            for i, h in enumerate(headers):
+                h_lower = str(h).lower().strip()
+                if any(x in h_lower for x in ['название', 'канал', 'name', 'channel']):
+                    name_idx = i
+                elif any(x in h_lower for x in ['ссылка', 'url', 'link']):
+                    url_idx = i
+                elif any(x in h_lower for x in ['подписчик', 'подписки', 'subscribers', 'subs']):
+                    subs_idx = i
+                elif any(x in h_lower for x in ['тема', 'topic']):
+                    topic_idx = i
+                elif any(x in h_lower for x in ['видео', 'video']):
+                    video_idx = i
+                elif 'er' in h_lower:
+                    er_idx = i
+                elif any(x in h_lower for x in ['дней', 'неактивн', 'days', 'inactive']):
+                    days_idx = i
+                elif any(x in h_lower for x in ['telegram', 'tg', 'телеграм']):
+                    tg_idx = i
+                elif 'vk' in h_lower:
+                    vk_idx = i
+                elif any(x in h_lower for x in ['скор', 'score', 'рейтинг']):
+                    score_idx = i
+                elif 'email' in h_lower:
+                    email_idx = i
+            
+            # Если нет ссылки или названия — пропускаем лист
+            if url_idx is None:
                 continue
             
             # Проходим по строкам
             for row in data[1:]:
-                if len(row) <= col_map['url']:
+                if len(row) <= url_idx:
                     continue
                 
-                url = row[col_map['url']].strip()
+                url = row[url_idx].strip() if url_idx < len(row) else ''
                 if not url:
                     continue
                 
-                # Получаем данные
+                name = row[name_idx].strip() if name_idx is not None and name_idx < len(row) else ''
+                
+                subscribers = 0
+                if subs_idx is not None and subs_idx < len(row) and row[subs_idx].strip():
+                    try:
+                        subscribers = int(float(row[subs_idx].strip().replace(',', '.')))
+                    except:
+                        pass
+                
+                topic = row[topic_idx].strip() if topic_idx is not None and topic_idx < len(row) else ''
+                video = row[video_idx].strip() if video_idx is not None and video_idx < len(row) else ''
+                
+                er = 0.0
+                if er_idx is not None and er_idx < len(row) and row[er_idx].strip():
+                    try:
+                        er = float(row[er_idx].strip().replace(',', '.'))
+                    except:
+                        pass
+                
+                days = 999
+                if days_idx is not None and days_idx < len(row) and row[days_idx].strip():
+                    try:
+                        days = int(float(row[days_idx].strip().replace(',', '.')))
+                    except:
+                        pass
+                
+                tg = row[tg_idx].strip() if tg_idx is not None and tg_idx < len(row) else ''
+                vk = row[vk_idx].strip() if vk_idx is not None and vk_idx < len(row) else ''
+                email = row[email_idx].strip() if email_idx is not None and email_idx < len(row) else ''
+                
+                score = 0
+                if score_idx is not None and score_idx < len(row) and row[score_idx].strip():
+                    try:
+                        score = int(float(row[score_idx].strip().replace(',', '.')))
+                    except:
+                        pass
+                
                 channel_data = {
-                    'name': row[col_map['name']].strip() if len(row) > col_map['name'] else '',
+                    'name': name,
                     'url': url,
-                    'subscribers': int(row[col_map['subscribers']]) if col_map.get('subscribers') is not None and len(row) > col_map['subscribers'] and row[col_map['subscribers']].strip() else 0,
-                    'topic': row[col_map['topic']].strip() if col_map.get('topic') is not None and len(row) > col_map['topic'] else '',
-                    'video_title': row[col_map['video']].strip() if col_map.get('video') is not None and len(row) > col_map['video'] else '',
-                    'engagement_rate': float(row[col_map['er']]) if col_map.get('er') is not None and len(row) > col_map['er'] and row[col_map['er']].strip() else 0,
-                    'days_inactive': int(row[col_map['days']]) if col_map.get('days') is not None and len(row) > col_map['days'] and row[col_map['days']].strip() else 999,
-                    'telegram': row[col_map['telegram']].strip() if col_map.get('telegram') is not None and len(row) > col_map['telegram'] else '',
-                    'vk': row[col_map['vk']].strip() if col_map.get('vk') is not None and len(row) > col_map['vk'] else '',
-                    'email': row[col_map['email']].strip() if col_map.get('email') is not None and len(row) > col_map['email'] else '',
-                    'score': int(row[col_map['score']]) if col_map.get('score') is not None and len(row) > col_map['score'] and row[col_map['score']].strip() else 0
+                    'subscribers': subscribers,
+                    'topic': topic,
+                    'video_title': video[:50] if video else '',
+                    'engagement_rate': er,
+                    'days_inactive': days,
+                    'telegram': tg,
+                    'vk': vk,
+                    'email': email,
+                    'score': score
                 }
                 
-                # Если канал уже есть — объединяем контакты
+                # Объединяем данные по URL
                 if url in all_channels_dict:
                     existing = all_channels_dict[url]
-                    if channel_data['telegram'] and not existing['telegram']:
-                        existing['telegram'] = channel_data['telegram']
-                    if channel_data['vk'] and not existing['vk']:
-                        existing['vk'] = channel_data['vk']
-                    if channel_data['email'] and not existing['email']:
-                        existing['email'] = channel_data['email']
-                    if channel_data['score'] > existing['score']:
-                        existing['score'] = channel_data['score']
-                    if channel_data['engagement_rate'] > existing['engagement_rate']:
-                        existing['engagement_rate'] = channel_data['engagement_rate']
-                    if channel_data['subscribers'] > existing['subscribers']:
-                        existing['subscribers'] = channel_data['subscribers']
+                    if tg and not existing.get('telegram'):
+                        existing['telegram'] = tg
+                    if vk and not existing.get('vk'):
+                        existing['vk'] = vk
+                    if email and not existing.get('email'):
+                        existing['email'] = email
+                    if score > existing.get('score', 0):
+                        existing['score'] = score
+                    if er > existing.get('engagement_rate', 0):
+                        existing['engagement_rate'] = er
+                    if subscribers > existing.get('subscribers', 0):
+                        existing['subscribers'] = subscribers
+                    if not existing.get('name') and name:
+                        existing['name'] = name
                 else:
                     all_channels_dict[url] = channel_data
         
         if not all_channels_dict:
-            bot.send_message(chat_id, "⚠️ Нет данных для обновления.", reply_markup=main_keyboard())
+            msg = "⚠️ Нет данных для обновления.\n\n"
+            if processed_sheets:
+                msg += f"📋 Обработаны листы: {', '.join(processed_sheets)}\n"
+                msg += "❌ Но в них не найдены каналы.\n\n"
+                msg += "📌 Убедитесь, что в таблице есть:\n"
+                msg += "• Колонка со ссылкой на канал (например, 'Ссылка', 'url')\n"
+                msg += "• Хотя бы одна строка с данными"
+            else:
+                msg += "📋 Нет листов с данными.\n\n"
+                msg += "📌 Сначала запустите парсер."
+            
+            bot.send_message(chat_id, msg, reply_markup=main_keyboard())
             return
         
-        # Преобразуем в список
         all_channels = list(all_channels_dict.values())
-        
-        # Сортируем по скору
         all_channels.sort(key=lambda x: x.get('score', 0), reverse=True)
         
         # ========== 2. ОБНОВЛЯЕМ ЛИСТ "БАЗА ДАННЫХ" ==========
         try:
             main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
-            all_data = main_sheet.get_all_values()
-            if len(all_data) > 1:
-                main_sheet.delete_rows(2, len(all_data) - 1)
         except:
             main_sheet = workbook.add_worksheet(title=MAIN_SHEET_NAME, rows=1, cols=10)
         
-        # Заголовки
+        # ПОЛНОСТЬЮ ОЧИЩАЕМ ЛИСТ
+        all_data = main_sheet.get_all_values()
+        if len(all_data) > 0:
+            main_sheet.delete_rows(1, len(all_data))
+        
+        # Добавляем заголовки
         headers = ["Название канала", "Ссылка", "Подписчики", "Тема",
                    "Найдено в видео", "ER (%)", "Дней неактивности",
                    "Telegram", "VK", "Скор"]
@@ -680,45 +727,47 @@ def refresh_sheet(chat_id):
                     ch.get('vk', ''),
                     ch.get('score', 0)
                 ])
-            except Exception as e:
-                logger.error(f"Ошибка добавления строки: {e}")
+            except:
+                pass
         
         format_sheet(main_sheet)
         
         # ========== 3. ОБНОВЛЯЕМ ЛИСТ "КОНТАКТЫ" ==========
-        # Собираем каналы с контактами (без дубликатов)
+        # Собираем каналы с контактами
         contacts_list = []
-        seen_contacts = set()
+        seen_urls = set()
+        
         for ch in all_channels:
             has_contact = ch.get('email') or ch.get('telegram') or ch.get('vk')
-            if has_contact and ch.get('score', 0) >= MIN_SCORE_FOR_TOP:
-                # Проверяем, не добавляли ли уже этот URL
-                url = ch.get('url', '')
-                if url not in seen_contacts:
-                    seen_contacts.add(url)
-                    contacts_list.append({
-                        'name': ch.get('name', ''),
-                        'url': url,
-                        'email': ch.get('email', ''),
-                        'telegram': ch.get('telegram', ''),
-                        'vk': ch.get('vk', ''),
-                        'score': ch.get('score', 0)
-                    })
+            url = ch.get('url', '')
+            
+            if has_contact and ch.get('score', 0) >= MIN_SCORE_FOR_TOP and url and url not in seen_urls:
+                seen_urls.add(url)
+                contacts_list.append({
+                    'name': ch.get('name', ''),
+                    'url': url,
+                    'email': ch.get('email', ''),
+                    'telegram': ch.get('telegram', ''),
+                    'vk': ch.get('vk', ''),
+                    'score': ch.get('score', 0)
+                })
         
         contacts_list.sort(key=lambda x: x['score'], reverse=True)
         
         try:
             contacts_sheet = workbook.worksheet(CONTACTS_SHEET_NAME)
-            all_data = contacts_sheet.get_all_values()
-            if len(all_data) > 1:
-                contacts_sheet.delete_rows(2, len(all_data) - 1)
         except:
             contacts_sheet = workbook.add_worksheet(title=CONTACTS_SHEET_NAME, rows=1, cols=6)
         
-        # Заголовки для контактов
+        # ПОЛНОСТЬЮ ОЧИЩАЕМ ЛИСТ КОНТАКТОВ
+        all_data = contacts_sheet.get_all_values()
+        if len(all_data) > 0:
+            contacts_sheet.delete_rows(1, len(all_data))
+        
         contacts_headers = ["Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"]
         contacts_sheet.append_row(contacts_headers)
         
+        # Заполняем контактами
         for ch in contacts_list:
             try:
                 contacts_sheet.append_row([
@@ -729,8 +778,8 @@ def refresh_sheet(chat_id):
                     ch.get('vk', ''),
                     ch.get('score', 0)
                 ])
-            except Exception as e:
-                logger.error(f"Ошибка добавления контакта: {e}")
+            except:
+                pass
         
         format_contacts_sheet(contacts_sheet)
         
@@ -738,6 +787,10 @@ def refresh_sheet(chat_id):
         msg = f"✅ **Таблица обновлена!**\n\n"
         msg += f"📊 Всего каналов: **{len(all_channels)}**\n"
         msg += f"📧 Каналов с контактами: **{len(contacts_list)}**\n\n"
+        
+        if processed_sheets:
+            msg += f"📋 Обработаны листы: {', '.join(processed_sheets)}\n\n"
+        
         msg += f"📋 Лист «{MAIN_SHEET_NAME}» обновлён\n"
         msg += f"📋 Лист «{CONTACTS_SHEET_NAME}» обновлён\n\n"
         msg += f"🔗 {workbook.url}"
@@ -748,15 +801,19 @@ def refresh_sheet(chat_id):
         bot.send_message(chat_id, f"❌ Ошибка обновления: {str(e)}", reply_markup=main_keyboard())
 
 def update_contacts_sheet(workbook, channels_db):
-    """Обновляет лист с контактами (без дубликатов) из базы данных"""
     try:
-        # Собираем все контакты из базы
+        if not channels_db:
+            return 0
+        
         contacts_dict = {}
         for ch_id, data in channels_db.items():
             url = data.get("url", "")
             if not url:
                 continue
+            
             contacts = data.get("contacts", {})
+            score = data.get("score", 0)
+            
             if url not in contacts_dict:
                 contacts_dict[url] = {
                     "name": data.get("name", ""),
@@ -764,7 +821,7 @@ def update_contacts_sheet(workbook, channels_db):
                     "email": contacts.get("email", ""),
                     "telegram": contacts.get("telegram", ""),
                     "vk": contacts.get("vk", ""),
-                    "score": data.get("score", 0)
+                    "score": score
                 }
             else:
                 existing = contacts_dict[url]
@@ -774,10 +831,9 @@ def update_contacts_sheet(workbook, channels_db):
                     existing["telegram"] = contacts["telegram"]
                 if contacts.get("vk") and not existing["vk"]:
                     existing["vk"] = contacts["vk"]
-                if data.get("score", 0) > existing["score"]:
-                    existing["score"] = data["score"]
+                if score > existing["score"]:
+                    existing["score"] = score
         
-        # Фильтруем каналы с контактами
         contacts_list = []
         for url, data in contacts_dict.items():
             has_contact = data["email"] or data["telegram"] or data["vk"]
@@ -786,7 +842,6 @@ def update_contacts_sheet(workbook, channels_db):
         
         contacts_list.sort(key=lambda x: x["score"], reverse=True)
         
-        # Создаём или очищаем лист
         try:
             contacts_sheet = workbook.worksheet(CONTACTS_SHEET_NAME)
             all_data = contacts_sheet.get_all_values()
@@ -798,16 +853,15 @@ def update_contacts_sheet(workbook, channels_db):
                 "Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"
             ])
         
-        # Заполняем
         for ch in contacts_list:
             try:
                 contacts_sheet.append_row([
-                    ch["name"],
-                    ch["url"],
-                    ch["email"],
-                    ch["telegram"],
-                    ch["vk"],
-                    ch["score"]
+                    ch.get("name", ""),
+                    ch.get("url", ""),
+                    ch.get("email", ""),
+                    ch.get("telegram", ""),
+                    ch.get("vk", ""),
+                    ch.get("score", 0)
                 ])
             except:
                 pass
@@ -1103,11 +1157,13 @@ def check_vk_tg(chat_id):
                 
                 time.sleep(0.1)
         
-        update_contacts_sheet(workbook, channels_db)
+        contacts_count = update_contacts_sheet(workbook, channels_db)
         
         bot.send_message(
             chat_id,
-            f"✅ Проверка завершена!\n\n📊 Обновлено ссылок: **{updated}**\n📋 Лист «Контакты» обновлён.",
+            f"✅ Проверка завершена!\n\n"
+            f"📊 Обновлено ссылок: **{updated}**\n"
+            f"📋 Лист «Контакты» обновлён: **{contacts_count}** каналов",
             parse_mode='Markdown',
             reply_markup=main_keyboard()
         )
@@ -1177,7 +1233,6 @@ def handle_text(message):
         bot.send_message(chat_id, "❌ У вас нет доступа к этому боту.", reply_markup=main_keyboard())
         return
     
-    # Состояния
     if user_id in user_states:
         state = user_states[user_id]
         
@@ -1685,7 +1740,6 @@ def handle_text(message):
             bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
         return
     
-    # Если ничего не подошло
     bot.send_message(chat_id, "Используйте кнопки меню:", reply_markup=main_keyboard())
 
 # ================= ЗАПУСК =================
