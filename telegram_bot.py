@@ -35,11 +35,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
-
-# YouTube API
 youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
-# Google Sheets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_SHEETS_CREDENTIALS, scope)
 client = gspread.authorize(creds)
@@ -117,11 +114,14 @@ def main_keyboard():
     )
     keyboard.add(
         KeyboardButton("🔄 Проверить VK/TG"),
-        KeyboardButton("👑 Админ-панель")
+        KeyboardButton("🔄 Обновить таблицу")
     )
     keyboard.add(
-        KeyboardButton("💾 Сохранить настройки"),
+        KeyboardButton("👑 Админ-панель"),
         KeyboardButton("❓ Помощь")
+    )
+    keyboard.add(
+        KeyboardButton("💾 Сохранить настройки")
     )
     return keyboard
 
@@ -422,7 +422,7 @@ def analyze_channel_deep(channel_data):
     
     return channel_data
 
-# ================= РАБОТА С GOOGLE SHEETS (УЛУЧШЕННАЯ) =================
+# ================= РАБОТА С GOOGLE SHEETS =================
 def get_workbook():
     try:
         return client.open(SPREADSHEET_NAME)
@@ -430,53 +430,26 @@ def get_workbook():
         return None
 
 def format_sheet(sheet):
-    """Форматирует таблицу: ширина колонок, цветовая индикация"""
+    """Форматирует таблицу"""
     try:
-        # Устанавливаем ширину колонок (в пикселях)
-        sheet.set_column_width(1, 300)  # Название канала
-        sheet.set_column_width(2, 350)  # Ссылка
-        sheet.set_column_width(3, 120)  # Подписчики
-        sheet.set_column_width(4, 150)  # Тема
-        sheet.set_column_width(5, 350)  # Найдено в видео
-        sheet.set_column_width(6, 120)  # ER
-        sheet.set_column_width(7, 120)  # Дней неактивности
-        sheet.set_column_width(8, 150)  # Telegram
-        sheet.set_column_width(9, 150)  # VK
-        sheet.set_column_width(10, 100) # Скор
+        sheet.set_column_width(1, 300)
+        sheet.set_column_width(2, 350)
+        sheet.set_column_width(3, 120)
+        sheet.set_column_width(4, 150)
+        sheet.set_column_width(5, 350)
+        sheet.set_column_width(6, 120)
+        sheet.set_column_width(7, 120)
+        sheet.set_column_width(8, 150)
+        sheet.set_column_width(9, 150)
+        sheet.set_column_width(10, 100)
         
-        # Применяем форматирование заголовков
         sheet.format('A1:J1', {
             "backgroundColor": {"red": 0.2, "green": 0.4, "blue": 0.6},
             "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
             "horizontalAlignment": "CENTER"
         })
-        
-        # Применяем условное форматирование для скоров
-        # Это делается через API, но проще использовать цветовые метки в коде
     except Exception as e:
         logger.error(f"Ошибка форматирования: {e}")
-
-def create_contacts_sheet(workbook):
-    """Создаёт отдельный лист с контактами"""
-    try:
-        try:
-            contacts_sheet = workbook.worksheet(CONTACTS_SHEET_NAME)
-            return contacts_sheet
-        except:
-            contacts_sheet = workbook.add_worksheet(title=CONTACTS_SHEET_NAME, rows=1, cols=6)
-            contacts_sheet.append_row([
-                "Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"
-            ])
-            # Форматируем заголовки
-            contacts_sheet.format('A1:F1', {
-                "backgroundColor": {"red": 0.1, "green": 0.6, "blue": 0.1},
-                "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
-                "horizontalAlignment": "CENTER"
-            })
-            return contacts_sheet
-    except Exception as e:
-        logger.error(f"Ошибка создания листа контактов: {e}")
-        return None
 
 def save_to_sheets(workbook, channels):
     try:
@@ -485,7 +458,7 @@ def save_to_sheets(workbook, channels):
         main_sheet = workbook.add_worksheet(title=MAIN_SHEET_NAME, rows=1, cols=10)
         main_sheet.append_row([
             "Название канала", "Ссылка", "Подписчики", "Тема",
-            "Найдено в видео", "ER (%)", "Дней неактивности", 
+            "Найдено в видео", "ER (%)", "Дней неактивности",
             "Telegram", "VK", "Скор"
         ])
         format_sheet(main_sheet)
@@ -519,23 +492,147 @@ def save_to_sheets(workbook, channels):
                 main_sheet.append_row(row)
             except:
                 pass
-        
-        # Форматируем таблицу
         format_sheet(main_sheet)
     
     return new_rows
 
-def update_contacts_sheet(workbook, channels_db):
-    """Обновляет лист с контактами (только каналы с найденными контактами)"""
+def refresh_sheet(chat_id):
+    """Полностью пересоздаёт таблицу из данных channels_db.json"""
     try:
-        contacts_sheet = create_contacts_sheet(workbook)
+        bot.send_message(chat_id, "🔄 Обновляю таблицу...", reply_markup=main_keyboard())
         
-        # Очищаем лист (оставляем только заголовки)
+        workbook = get_workbook()
+        if not workbook:
+            bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
+            return
+        
+        channels_db = load_channels_db()
+        
+        if not channels_db:
+            bot.send_message(chat_id, "⚠️ Нет данных для обновления. Сначала запустите парсер.", reply_markup=main_keyboard())
+            return
+        
+        # ========== 1. ОБНОВЛЯЕМ ЛИСТ "БАЗА ДАННЫХ" ==========
+        try:
+            main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
+            all_data = main_sheet.get_all_values()
+            if len(all_data) > 1:
+                main_sheet.delete_rows(2, len(all_data) - 1)
+        except:
+            main_sheet = workbook.add_worksheet(title=MAIN_SHEET_NAME, rows=1, cols=10)
+            main_sheet.append_row([
+                "Название канала", "Ссылка", "Подписчики", "Тема",
+                "Найдено в видео", "ER (%)", "Дней неактивности",
+                "Telegram", "VK", "Скор"
+            ])
+        
+        rows_to_add = []
+        for ch_id, data in channels_db.items():
+            contacts = data.get("contacts", {})
+            rows_to_add.append([
+                data.get("name", ""),
+                data.get("url", ""),
+                data.get("subscribers", 0),
+                data.get("topic", ""),
+                data.get("video_title", "")[:50],
+                data.get("engagement_rate", 0),
+                data.get("days_inactive", 999),
+                contacts.get("telegram", ""),
+                contacts.get("vk", ""),
+                data.get("score", 0)
+            ])
+        
+        rows_to_add.sort(key=lambda x: x[9] if x[9] else 0, reverse=True)
+        
+        for row in rows_to_add:
+            try:
+                main_sheet.append_row(row)
+            except:
+                pass
+        
+        format_sheet(main_sheet)
+        
+        # ========== 2. ОБНОВЛЯЕМ ЛИСТ "КОНТАКТЫ" ==========
+        try:
+            contacts_sheet = workbook.worksheet(CONTACTS_SHEET_NAME)
+            all_data = contacts_sheet.get_all_values()
+            if len(all_data) > 1:
+                contacts_sheet.delete_rows(2, len(all_data) - 1)
+        except:
+            contacts_sheet = workbook.add_worksheet(title=CONTACTS_SHEET_NAME, rows=1, cols=6)
+            contacts_sheet.append_row([
+                "Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"
+            ])
+        
+        contacts_added = 0
+        for ch_id, data in channels_db.items():
+            contacts = data.get("contacts", {})
+            has_contact = contacts.get("email") or contacts.get("telegram") or contacts.get("vk")
+            
+            if has_contact and data.get("score", 0) >= MIN_SCORE_FOR_TOP:
+                try:
+                    contacts_sheet.append_row([
+                        data.get("name", ""),
+                        data.get("url", ""),
+                        contacts.get("email", ""),
+                        contacts.get("telegram", ""),
+                        contacts.get("vk", ""),
+                        data.get("score", 0)
+                    ])
+                    contacts_added += 1
+                except:
+                    pass
+        
+        contacts_sheet.format('A1:F1', {
+            "backgroundColor": {"red": 0.1, "green": 0.6, "blue": 0.1},
+            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+            "horizontalAlignment": "CENTER"
+        })
+        
+        contacts_data = contacts_sheet.get_all_values()
+        for i in range(2, len(contacts_data) + 1):
+            try:
+                email = contacts_sheet.cell(i, 3).value
+                if email:
+                    contacts_sheet.format(f'A{i}:F{i}', {
+                        "backgroundColor": {"red": 0.9, "green": 1, "blue": 0.8}
+                    })
+            except:
+                pass
+        
+        contacts_sheet.set_column_width(1, 300)
+        contacts_sheet.set_column_width(2, 350)
+        contacts_sheet.set_column_width(3, 250)
+        contacts_sheet.set_column_width(4, 200)
+        contacts_sheet.set_column_width(5, 200)
+        contacts_sheet.set_column_width(6, 100)
+        
+        msg = f"✅ **Таблица обновлена!**\n\n"
+        msg += f"📊 Всего каналов: **{len(rows_to_add)}**\n"
+        msg += f"📧 Каналов с контактами: **{contacts_added}**\n\n"
+        msg += f"📋 Лист «{MAIN_SHEET_NAME}» обновлён\n"
+        msg += f"📋 Лист «{CONTACTS_SHEET_NAME}» обновлён\n\n"
+        msg += f"🔗 {workbook.url}"
+        
+        bot.send_message(chat_id, msg, parse_mode='Markdown', reply_markup=main_keyboard())
+        
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ошибка обновления: {str(e)}", reply_markup=main_keyboard())
+
+def update_contacts_sheet(workbook, channels_db):
+    try:
+        try:
+            contacts_sheet = workbook.worksheet(CONTACTS_SHEET_NAME)
+        except:
+            contacts_sheet = workbook.add_worksheet(title=CONTACTS_SHEET_NAME, rows=1, cols=6)
+            contacts_sheet.append_row([
+                "Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"
+            ])
+        
         all_data = contacts_sheet.get_all_values()
         if len(all_data) > 1:
             contacts_sheet.delete_rows(2, len(all_data) - 1)
         
-        # Добавляем каналы с контактами
         added = 0
         for ch_id, data in channels_db.items():
             contacts = data.get("contacts", {})
@@ -555,19 +652,29 @@ def update_contacts_sheet(workbook, channels_db):
                 except:
                     pass
         
-        # Форматируем добавленные строки
-        if added > 0:
-            # Подсветка найденных контактов
-            for i in range(2, added + 2):
-                try:
-                    # Проверяем, есть ли email в строке
-                    email = contacts_sheet.cell(i, 3).value
-                    if email:
-                        contacts_sheet.format(f'A{i}:F{i}', {
-                            "backgroundColor": {"red": 0.9, "green": 1, "blue": 0.8}
-                        })
-                except:
-                    pass
+        contacts_sheet.format('A1:F1', {
+            "backgroundColor": {"red": 0.1, "green": 0.6, "blue": 0.1},
+            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+            "horizontalAlignment": "CENTER"
+        })
+        
+        contacts_data = contacts_sheet.get_all_values()
+        for i in range(2, len(contacts_data) + 1):
+            try:
+                email = contacts_sheet.cell(i, 3).value
+                if email:
+                    contacts_sheet.format(f'A{i}:F{i}', {
+                        "backgroundColor": {"red": 0.9, "green": 1, "blue": 0.8}
+                    })
+            except:
+                pass
+        
+        contacts_sheet.set_column_width(1, 300)
+        contacts_sheet.set_column_width(2, 350)
+        contacts_sheet.set_column_width(3, 250)
+        contacts_sheet.set_column_width(4, 200)
+        contacts_sheet.set_column_width(5, 200)
+        contacts_sheet.set_column_width(6, 100)
         
         return added
     except Exception as e:
@@ -578,7 +685,6 @@ def update_sheet_with_analysis(workbook, channels_db):
     try:
         main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
         
-        # Убеждаемся, что есть все колонки
         headers = main_sheet.row_values(1)
         new_headers = [
             "Название канала", "Ссылка", "Подписчики", "Тема",
@@ -616,10 +722,7 @@ def update_sheet_with_analysis(workbook, channels_db):
                 
                 time.sleep(0.1)
         
-        # Обновляем лист с контактами
         update_contacts_sheet(workbook, channels_db)
-        
-        # Форматируем таблицу
         format_sheet(main_sheet)
                 
     except Exception as e:
@@ -861,7 +964,6 @@ def check_vk_tg(chat_id):
                 
                 time.sleep(0.1)
         
-        # Обновляем лист контактов
         update_contacts_sheet(workbook, channels_db)
         
         bot.send_message(
@@ -936,7 +1038,7 @@ def handle_text(message):
         bot.send_message(chat_id, "❌ У вас нет доступа к этому боту.", reply_markup=main_keyboard())
         return
     
-    # Состояния (ожидание ввода)
+    # Состояния
     if user_id in user_states:
         state = user_states[user_id]
         
@@ -1129,6 +1231,10 @@ def handle_text(message):
         check_vk_tg(chat_id)
         return
     
+    if text == "🔄 Обновить таблицу":
+        refresh_sheet(chat_id)
+        return
+    
     if text == "💾 Сохранить настройки":
         update_global_settings()
         bot.send_message(chat_id, "✅ Настройки синхронизированы и сохранены!", reply_markup=main_keyboard())
@@ -1140,13 +1246,15 @@ def handle_text(message):
 
 **Основные функции:**
 
-🔍 **Запустить парсер** — поиск новых каналов по темам
+🚀 **Запустить парсер** — поиск новых каналов по темам
 
 📊 **Глубокий анализ** — анализ ER, активности, поиск контактов
 
 🏆 **ТОП кандидатов** — список лучших каналов для сотрудничества
 
 🔄 **Проверить VK/TG** — обновление ссылок в таблице
+
+🔄 **Обновить таблицу** — пересоздать таблицу из базы данных
 
 👑 **Админ-панель** — управление настройками
 
@@ -1269,9 +1377,7 @@ def handle_text(message):
         if not is_admin(user_id):
             bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=admin_keyboard())
             return
-        # Проверяем, что это не добавление темы (если тема уже есть)
         potential_topic = text.replace("add ", "").strip()
-        # Если это похоже на ID (только цифры)
         if potential_topic.isdigit():
             try:
                 new_id = int(potential_topic)
@@ -1287,7 +1393,6 @@ def handle_text(message):
             except ValueError:
                 bot.send_message(chat_id, "❌ Введите корректный ID.", reply_markup=admin_keyboard())
         else:
-            # Это добавление темы
             if potential_topic in SEARCH_TOPICS:
                 bot.send_message(chat_id, f"⚠️ Тема '{potential_topic}' уже есть.", reply_markup=admin_keyboard())
                 return
@@ -1322,7 +1427,6 @@ def handle_text(message):
             except ValueError:
                 bot.send_message(chat_id, "❌ Введите корректный ID.", reply_markup=admin_keyboard())
         else:
-            # Удаление темы
             if potential not in SEARCH_TOPICS:
                 bot.send_message(chat_id, f"⚠️ Тема '{potential}' не найдена.", reply_markup=admin_keyboard())
                 return
