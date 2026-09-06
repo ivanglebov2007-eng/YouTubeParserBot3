@@ -2,35 +2,30 @@ import time
 import re
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from googleapiclient.discovery import build
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import telebot
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import logging
 
 # ================= НАСТРОЙКИ =================
 TELEGRAM_BOT_TOKEN = "8994730100:AAE6P65OqjVOTAftOIPZuBF70WAwzxz116A"
 YOUTUBE_API_KEY = "AIzaSyAbAkrORDfJRoTfGn7nn0TSuP8tz_hFEb0"
 
-# ================= ПАРАМЕТРЫ ФИЛЬТРАЦИИ =================
+# Параметры фильтрации
 MIN_ENGAGEMENT_RATE = 3.0
 MIN_GROWTH_RATE = 5.0
 MAX_DAYS_INACTIVE = 30
 MIN_SCORE_FOR_TOP = 65
 
-# ================= НАСТРОЙКИ GOOGLE =================
 GOOGLE_SHEETS_CREDENTIALS = "credentials.json"
-SPREADSHEET_NAME = "YouTube Каналы RP (из видео)"
-MAIN_SHEET_NAME = "База данных (Новая)"   # НОВОЕ ИМЯ!
-CONTACTS_SHEET_NAME = "Контакты"
+MAIN_SHEET_NAME = "База данных"
 
-# ================= ФАЙЛЫ ДЛЯ ХРАНЕНИЯ =================
 SETTINGS_FILE = "bot_settings.json"
 CHANNELS_DB_FILE = "data/channels_db.json"
 
-# ================= ИНИЦИАЛИЗАЦИЯ =================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -43,7 +38,7 @@ client = gspread.authorize(creds)
 
 user_states = {}
 
-# ================= ЗАГРУЗКА/СОХРАНЕНИЕ ДАННЫХ =================
+# ================= ЗАГРУЗКА/СОХРАНЕНИЕ =================
 def ensure_data_dir():
     os.makedirs("data", exist_ok=True)
 
@@ -101,47 +96,7 @@ def update_global_settings():
     MAX_SUBSCRIBERS = s.get("max_subscribers", 50000)
     MIN_SUBSCRIBERS = s.get("min_subscribers", 100)
 
-# ================= КЛАВИАТУРА =================
-def main_keyboard():
-    keyboard = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=False)
-    keyboard.add(
-        KeyboardButton("🚀 Запустить парсер"),
-        KeyboardButton("📊 Статистика")
-    )
-    keyboard.add(
-        KeyboardButton("🔍 Глубокий анализ"),
-        KeyboardButton("🏆 ТОП кандидатов")
-    )
-    keyboard.add(
-        KeyboardButton("🔄 Проверить VK/TG"),
-        KeyboardButton("🔄 Обновить таблицу")
-    )
-    keyboard.add(
-        KeyboardButton("👑 Админ-панель"),
-        KeyboardButton("❓ Помощь")
-    )
-    keyboard.add(
-        KeyboardButton("💾 Сохранить настройки")
-    )
-    return keyboard
-
-def admin_keyboard():
-    keyboard = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=False)
-    keyboard.add(
-        KeyboardButton("📋 Настройки"),
-        KeyboardButton("👥 Пользователи")
-    )
-    keyboard.add(
-        KeyboardButton("📌 Темы поиска"),
-        KeyboardButton("👤 Лимит подписчиков")
-    )
-    keyboard.add(
-        KeyboardButton("📈 Параметры анализа"),
-        KeyboardButton("🔙 Назад")
-    )
-    return keyboard
-
-# ================= РАБОТА С YOUTUBE API =================
+# ================= РАБОТА С YOUTUBE =================
 def get_channel_statistics(channel_id):
     try:
         request = youtube.channels().list(part="statistics,snippet", id=channel_id)
@@ -208,7 +163,7 @@ def get_recent_videos(channel_id, limit=10):
         logger.error(f"Ошибка получения видео: {e}")
         return []
 
-def search_channels_by_topic(topic, max_results=20):
+def search_channels_by_topic(topic, max_results=15):
     found_channels = {}
     next_page_token = None
     attempts = 0
@@ -271,17 +226,7 @@ def search_channels_by_topic(topic, max_results=20):
 
 # ================= АНАЛИЗ И СКОРИНГ =================
 def extract_links(text):
-    links = {
-        "vk": "",
-        "telegram": "",
-        "instagram": "",
-        "twitter": "",
-        "youtube": "",
-        "tiktok": "",
-        "email": "",
-        "site": ""
-    }
-    
+    links = {"vk": "", "telegram": "", "instagram": "", "twitter": "", "youtube": "", "tiktok": "", "email": "", "site": ""}
     if not text:
         return links
     
@@ -313,21 +258,17 @@ def extract_links(text):
 def calculate_engagement_rate(videos):
     if not videos or len(videos) < 3:
         return 0.0
-    
     total_views = 0
     total_likes = 0
     total_comments = 0
     count = 0
-    
     for video in videos[:10]:
         total_views += video["views"]
         total_likes += video["likes"]
         total_comments += video["comments"]
         count += 1
-    
     if count == 0 or total_views == 0:
         return 0.0
-    
     total_engagement = total_likes + total_comments
     er = (total_engagement / total_views) * 100
     return round(er, 2)
@@ -344,64 +285,39 @@ def calculate_days_inactive(videos):
 
 def calculate_channel_score(channel_data, videos):
     score = 0
-    
     subs = channel_data.get("subscribers", 0)
-    if subs >= 100000:
-        score += 25
-    elif subs >= 50000:
-        score += 22
-    elif subs >= 10000:
-        score += 18
-    elif subs >= 5000:
-        score += 14
-    elif subs >= 1000:
-        score += 10
-    elif subs >= 500:
-        score += 5
-    else:
-        score += 2
+    if subs >= 100000: score += 25
+    elif subs >= 50000: score += 22
+    elif subs >= 10000: score += 18
+    elif subs >= 5000: score += 14
+    elif subs >= 1000: score += 10
+    elif subs >= 500: score += 5
+    else: score += 2
     
     er = calculate_engagement_rate(videos)
-    if er >= 10:
-        score += 25
-    elif er >= 7:
-        score += 20
-    elif er >= 5:
-        score += 15
-    elif er >= 3:
-        score += 10
-    elif er >= 1:
-        score += 5
-    else:
-        score += 0
+    if er >= 10: score += 25
+    elif er >= 7: score += 20
+    elif er >= 5: score += 15
+    elif er >= 3: score += 10
+    elif er >= 1: score += 5
+    else: score += 0
     
     days = calculate_days_inactive(videos)
-    if days <= 3:
-        score += 20
-    elif days <= 7:
-        score += 15
-    elif days <= 14:
-        score += 10
-    elif days <= 30:
-        score += 5
-    else:
-        score += 0
+    if days <= 3: score += 20
+    elif days <= 7: score += 15
+    elif days <= 14: score += 10
+    elif days <= 30: score += 5
+    else: score += 0
     
     contacts = channel_data.get("contacts", {})
-    if contacts.get("email"):
-        score += 10
-    if contacts.get("telegram"):
-        score += 5
-    if contacts.get("vk"):
-        score += 3
-    if contacts.get("instagram"):
-        score += 2
+    if contacts.get("email"): score += 10
+    if contacts.get("telegram"): score += 5
+    if contacts.get("vk"): score += 3
+    if contacts.get("instagram"): score += 2
     
     desc = channel_data.get("description", "")
-    if len(desc) > 200:
-        score += 5
-    if "партнер" in desc.lower() or "сотрудничество" in desc.lower():
-        score += 5
+    if len(desc) > 200: score += 5
+    if "партнер" in desc.lower() or "сотрудничество" in desc.lower(): score += 5
     
     return min(score, 100)
 
@@ -422,516 +338,179 @@ def analyze_channel_deep(channel_data):
     
     return channel_data
 
-# ================= ФОРМАТИРОВАНИЕ ТАБЛИЦ =================
-def format_sheet(sheet):
-    try:
-        sheet.set_column_width(1, 300)
-        sheet.set_column_width(2, 350)
-        sheet.set_column_width(3, 120)
-        sheet.set_column_width(4, 150)
-        sheet.set_column_width(5, 350)
-        sheet.set_column_width(6, 120)
-        sheet.set_column_width(7, 120)
-        sheet.set_column_width(8, 150)
-        sheet.set_column_width(9, 150)
-        sheet.set_column_width(10, 100)
-        
-        sheet.format('A1:J1', {
-            "backgroundColor": {"red": 0.2, "green": 0.4, "blue": 0.6},
-            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
-            "horizontalAlignment": "CENTER"
-        })
-        sheet.format('A2:J', {"wrapStrategy": "WRAP"})
-    except Exception as e:
-        logger.error(f"Ошибка форматирования основной таблицы: {e}")
-
-def format_contacts_sheet(sheet):
-    try:
-        sheet.set_column_width(1, 300)
-        sheet.set_column_width(2, 350)
-        sheet.set_column_width(3, 250)
-        sheet.set_column_width(4, 200)
-        sheet.set_column_width(5, 200)
-        sheet.set_column_width(6, 100)
-        
-        sheet.format('A1:F1', {
-            "backgroundColor": {"red": 0.1, "green": 0.6, "blue": 0.1},
-            "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
-            "horizontalAlignment": "CENTER"
-        })
-        sheet.format('A2:F', {"wrapStrategy": "WRAP"})
-        
-        all_data = sheet.get_all_values()
-        for i in range(2, len(all_data) + 1):
-            try:
-                email = sheet.cell(i, 3).value
-                if email:
-                    sheet.format(f'A{i}:F{i}', {
-                        "backgroundColor": {"red": 0.85, "green": 0.95, "blue": 0.75}
-                    })
-            except:
-                pass
-    except Exception as e:
-        logger.error(f"Ошибка форматирования листа контактов: {e}")
-
-# ================= НОВАЯ ФУНКЦИЯ: ПЕРЕНОС ДАННЫХ =================
-def migrate_data_to_new_main(chat_id):
-    """Переносит данные из всех листов в новую базу (без дубликатов)"""
-    try:
-        workbook = get_workbook()
-        if not workbook:
-            bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
-            return
-        
-        bot.send_message(chat_id, "🔄 Переношу данные в новую базу...", reply_markup=main_keyboard())
-        
-        all_worksheets = workbook.worksheets()
-        all_channels_dict = {}
-        
-        for ws in all_worksheets:
-            if ws.title == MAIN_SHEET_NAME or ws.title == CONTACTS_SHEET_NAME:
-                continue
-            
-            data = ws.get_all_values()
-            if len(data) <= 1:
-                continue
-            
-            headers = data[0]
-            url_idx = None
-            name_idx = None
-            subs_idx = None
-            topic_idx = None
-            video_idx = None
-            er_idx = None
-            days_idx = None
-            tg_idx = None
-            vk_idx = None
-            email_idx = None
-            score_idx = None
-            
-            for i, h in enumerate(headers):
-                h_lower = str(h).lower().strip()
-                if any(x in h_lower for x in ['название', 'канал', 'name', 'channel']):
-                    name_idx = i
-                elif any(x in h_lower for x in ['ссылка', 'url', 'link']):
-                    url_idx = i
-                elif any(x in h_lower for x in ['подписчик', 'подписки', 'subscribers', 'subs']):
-                    subs_idx = i
-                elif any(x in h_lower for x in ['тема', 'topic']):
-                    topic_idx = i
-                elif any(x in h_lower for x in ['видео', 'video']):
-                    video_idx = i
-                elif 'er' in h_lower:
-                    er_idx = i
-                elif any(x in h_lower for x in ['дней', 'неактивн', 'days', 'inactive']):
-                    days_idx = i
-                elif any(x in h_lower for x in ['telegram', 'tg', 'телеграм']):
-                    tg_idx = i
-                elif 'vk' in h_lower:
-                    vk_idx = i
-                elif any(x in h_lower for x in ['скор', 'score', 'рейтинг']):
-                    score_idx = i
-                elif 'email' in h_lower:
-                    email_idx = i
-            
-            if url_idx is None:
-                continue
-            
-            for row in data[1:]:
-                if len(row) <= url_idx:
-                    continue
-                
-                url = row[url_idx].strip() if url_idx < len(row) else ''
-                if not url:
-                    continue
-                
-                name = row[name_idx].strip() if name_idx is not None and name_idx < len(row) else ''
-                
-                subscribers = 0
-                if subs_idx is not None and subs_idx < len(row) and row[subs_idx].strip():
-                    try:
-                        subscribers = int(float(row[subs_idx].strip().replace(',', '.')))
-                    except:
-                        pass
-                
-                topic = row[topic_idx].strip() if topic_idx is not None and topic_idx < len(row) else ''
-                video = row[video_idx].strip() if video_idx is not None and video_idx < len(row) else ''
-                
-                er = 0.0
-                if er_idx is not None and er_idx < len(row) and row[er_idx].strip():
-                    try:
-                        er = float(row[er_idx].strip().replace(',', '.'))
-                    except:
-                        pass
-                
-                days = 999
-                if days_idx is not None and days_idx < len(row) and row[days_idx].strip():
-                    try:
-                        days = int(float(row[days_idx].strip().replace(',', '.')))
-                    except:
-                        pass
-                
-                tg = row[tg_idx].strip() if tg_idx is not None and tg_idx < len(row) else ''
-                vk = row[vk_idx].strip() if vk_idx is not None and vk_idx < len(row) else ''
-                email = row[email_idx].strip() if email_idx is not None and email_idx < len(row) else ''
-                
-                score = 0
-                if score_idx is not None and score_idx < len(row) and row[score_idx].strip():
-                    try:
-                        score = int(float(row[score_idx].strip().replace(',', '.')))
-                    except:
-                        pass
-                
-                channel_data = {
-                    'name': name,
-                    'url': url,
-                    'subscribers': subscribers,
-                    'topic': topic,
-                    'video_title': video[:50] if video else '',
-                    'engagement_rate': er,
-                    'days_inactive': days,
-                    'telegram': tg,
-                    'vk': vk,
-                    'email': email,
-                    'score': score
-                }
-                
-                if url in all_channels_dict:
-                    existing = all_channels_dict[url]
-                    if tg and not existing.get('telegram'):
-                        existing['telegram'] = tg
-                    if vk and not existing.get('vk'):
-                        existing['vk'] = vk
-                    if email and not existing.get('email'):
-                        existing['email'] = email
-                    if score > existing.get('score', 0):
-                        existing['score'] = score
-                    if er > existing.get('engagement_rate', 0):
-                        existing['engagement_rate'] = er
-                    if subscribers > existing.get('subscribers', 0):
-                        existing['subscribers'] = subscribers
-                    if not existing.get('name') and name:
-                        existing['name'] = name
-                else:
-                    all_channels_dict[url] = channel_data
-        
-        # Сохраняем в channels_db.json
-        for url, data in all_channels_dict.items():
-            # Преобразуем в формат для channels_db
-            channels_db = load_channels_db()
-            # Ищем channel_id из url
-            channel_id = url.split("/")[-1]
-            if channel_id not in channels_db:
-                channels_db[channel_id] = {
-                    "channel_id": channel_id,
-                    "name": data.get('name', ''),
-                    "url": url,
-                    "subscribers": data.get('subscribers', 0),
-                    "topic": data.get('topic', ''),
-                    "video_title": data.get('video_title', ''),
-                    "engagement_rate": data.get('engagement_rate', 0),
-                    "days_inactive": data.get('days_inactive', 999),
-                    "contacts": {
-                        "telegram": data.get('telegram', ''),
-                        "vk": data.get('vk', ''),
-                        "email": data.get('email', '')
-                    },
-                    "score": data.get('score', 0),
-                    "analyzed": True
-                }
-            save_channels_db(channels_db)
-        
-        bot.send_message(chat_id, f"✅ Перенос завершён! Перенесено **{len(all_channels_dict)}** уникальных каналов.", parse_mode='Markdown', reply_markup=main_keyboard())
-        return all_channels_dict
-        
-    except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка миграции: {str(e)}", reply_markup=main_keyboard())
-        return None
-
-# ================= ОСТАЛЬНЫЕ ФУНКЦИИ (СОКРАЩЕННЫЕ) =================
-def get_workbook():
-    try:
-        return client.open(SPREADSHEET_NAME)
-    except:
-        return None
-
-def save_to_sheets(workbook, channels):
-    try:
-        main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
-    except:
-        main_sheet = workbook.add_worksheet(title=MAIN_SHEET_NAME, rows=1, cols=10)
-        main_sheet.append_row([
-            "Название канала", "Ссылка", "Подписчики", "Тема",
-            "Найдено в видео", "ER (%)", "Дней неактивности",
-            "Telegram", "VK", "Скор"
-        ])
-        format_sheet(main_sheet)
+# ================= СОЗДАНИЕ ПУБЛИЧНОЙ ТАБЛИЦЫ =================
+def create_public_workbook(topic):
+    """Создаёт новую публичную таблицу с отчётом"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H-%M")
+    sheet_name = f"YouTube Отчёт {topic} {timestamp}"
     
-    existing_urls = set()
-    all_data = main_sheet.get_all_values()
-    for row in all_data[1:]:
-        if len(row) > 1 and row[1]:
-            existing_urls.add(row[1].strip())
-    
-    new_rows = []
-    for ch in channels:
-        if ch["url"] not in existing_urls:
-            contacts = ch.get("contacts", {})
-            new_rows.append([
-                ch["name"],
-                ch["url"],
-                ch["subscribers"],
-                ch["topic"],
-                ch.get("video_title", "")[:50],
-                ch.get("engagement_rate", 0),
-                ch.get("days_inactive", 999),
-                contacts.get("telegram", ""),
-                contacts.get("vk", ""),
-                ch.get("score", 0)
-            ])
-    
-    if new_rows:
-        for row in new_rows:
-            try:
-                main_sheet.append_row(row)
-            except:
-                pass
-        format_sheet(main_sheet)
-    
-    return new_rows
-
-def refresh_sheet(chat_id):
     try:
-        bot.send_message(chat_id, "🔄 Обновляю таблицу...", reply_markup=main_keyboard())
+        workbook = client.create(sheet_name)
         
-        workbook = get_workbook()
-        if not workbook:
-            bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
-            return
+        # Делаем публичной (доступ по ссылке)
+        workbook.insert_permission(
+            value='',
+            perm_type='anyone',
+            role='reader'
+        )
         
-        # Сначала мигрируем данные
-        all_channels_dict = migrate_data_to_new_main(chat_id)
-        if not all_channels_dict:
-            return
-        
-        all_channels = list(all_channels_dict.values())
-        all_channels.sort(key=lambda x: x.get('score', 0), reverse=True)
-        
-        # Создаём новый лист
-        try:
-            main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
-        except:
-            main_sheet = workbook.add_worksheet(title=MAIN_SHEET_NAME, rows=1, cols=10)
-        
-        # Очищаем
-        all_data = main_sheet.get_all_values()
-        if len(all_data) > 0:
-            main_sheet.delete_rows(1, len(all_data))
-        
-        headers = ["Название канала", "Ссылка", "Подписчики", "Тема",
-                   "Найдено в видео", "ER (%)", "Дней неактивности",
-                   "Telegram", "VK", "Скор"]
+        # Создаём лист с данными
+        main_sheet = workbook.add_worksheet(title="Каналы", rows=1, cols=10)
+        headers = ["Название канала", "Ссылка", "Подписчики", "Тема", 
+                   "ER (%)", "Дней неактивности", "Email", "Telegram", "VK", "Скор"]
         main_sheet.append_row(headers)
         
-        for ch in all_channels:
-            try:
-                main_sheet.append_row([
-                    ch.get('name', ''),
-                    ch.get('url', ''),
-                    ch.get('subscribers', 0),
-                    ch.get('topic', ''),
-                    ch.get('video_title', '')[:50],
-                    ch.get('engagement_rate', 0),
-                    ch.get('days_inactive', 999),
-                    ch.get('telegram', ''),
-                    ch.get('vk', ''),
-                    ch.get('score', 0)
-                ])
-            except:
-                pass
-        
-        format_sheet(main_sheet)
-        
-        # Обновляем Контакты
-        contacts_list = []
-        seen_urls = set()
-        for ch in all_channels:
-            has_contact = ch.get('email') or ch.get('telegram') or ch.get('vk')
-            url = ch.get('url', '')
-            if has_contact and ch.get('score', 0) >= MIN_SCORE_FOR_TOP and url and url not in seen_urls:
-                seen_urls.add(url)
-                contacts_list.append({
-                    'name': ch.get('name', ''),
-                    'url': url,
-                    'email': ch.get('email', ''),
-                    'telegram': ch.get('telegram', ''),
-                    'vk': ch.get('vk', ''),
-                    'score': ch.get('score', 0)
-                })
-        
-        contacts_list.sort(key=lambda x: x['score'], reverse=True)
-        
-        try:
-            contacts_sheet = workbook.worksheet(CONTACTS_SHEET_NAME)
-        except:
-            contacts_sheet = workbook.add_worksheet(title=CONTACTS_SHEET_NAME, rows=1, cols=6)
-        
-        all_data = contacts_sheet.get_all_values()
-        if len(all_data) > 0:
-            contacts_sheet.delete_rows(1, len(all_data))
-        
-        contacts_headers = ["Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"]
-        contacts_sheet.append_row(contacts_headers)
-        
-        for ch in contacts_list:
-            try:
-                contacts_sheet.append_row([
-                    ch.get('name', ''),
-                    ch.get('url', ''),
-                    ch.get('email', ''),
-                    ch.get('telegram', ''),
-                    ch.get('vk', ''),
-                    ch.get('score', 0)
-                ])
-            except:
-                pass
-        
-        format_contacts_sheet(contacts_sheet)
-        
-        msg = f"✅ **Таблица обновлена!**\n\n"
-        msg += f"📊 Всего каналов: **{len(all_channels)}**\n"
-        msg += f"📧 Каналов с контактами: **{len(contacts_list)}**\n\n"
-        msg += f"📋 Новый лист «{MAIN_SHEET_NAME}» создан\n"
-        msg += f"📋 Лист «Контакты» обновлён\n\n"
-        msg += f"🔗 {workbook.url}"
-        
-        bot.send_message(chat_id, msg, parse_mode='Markdown', reply_markup=main_keyboard())
-        
+        return workbook, main_sheet
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка обновления: {str(e)}", reply_markup=main_keyboard())
+        logger.error(f"Ошибка создания таблицы: {e}")
+        return None, None
 
-# ... (остальные функции обработчиков и запуска остаются без изменений)
-
-def update_contacts_sheet(workbook, channels_db):
+def format_public_sheet(sheet):
+    """Форматирует публичную таблицу"""
     try:
-        if not channels_db:
-            return 0
+        sheet.format('A1:J1', {
+            "textFormat": {"bold": True},
+            "backgroundColor": {"red": 0.2, "green": 0.2, "blue": 0.8},
+            "textFormat": {"foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}}
+        })
         
-        contacts_dict = {}
-        for ch_id, data in channels_db.items():
-            url = data.get("url", "")
-            if not url:
-                continue
-            
-            contacts = data.get("contacts", {})
-            score = data.get("score", 0)
-            
-            if url not in contacts_dict:
-                contacts_dict[url] = {
-                    "name": data.get("name", ""),
-                    "url": url,
-                    "email": contacts.get("email", ""),
-                    "telegram": contacts.get("telegram", ""),
-                    "vk": contacts.get("vk", ""),
-                    "score": score
+        sheet_id = sheet.id
+        requests = []
+        col_widths = [300, 350, 120, 150, 100, 120, 200, 150, 150, 80]
+        for i, width in enumerate(col_widths, start=1):
+            requests.append({
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": i - 1,
+                        "endIndex": i
+                    },
+                    "properties": {"pixelSize": width},
+                    "fields": "pixelSize"
                 }
-            else:
-                existing = contacts_dict[url]
-                if contacts.get("email") and not existing["email"]:
-                    existing["email"] = contacts["email"]
-                if contacts.get("telegram") and not existing["telegram"]:
-                    existing["telegram"] = contacts["telegram"]
-                if contacts.get("vk") and not existing["vk"]:
-                    existing["vk"] = contacts["vk"]
-                if score > existing["score"]:
-                    existing["score"] = score
+            })
         
-        contacts_list = []
-        for url, data in contacts_dict.items():
-            has_contact = data["email"] or data["telegram"] or data["vk"]
-            if has_contact and data["score"] >= MIN_SCORE_FOR_TOP:
-                contacts_list.append(data)
-        
-        contacts_list.sort(key=lambda x: x["score"], reverse=True)
-        
-        try:
-            contacts_sheet = workbook.worksheet(CONTACTS_SHEET_NAME)
-            all_data = contacts_sheet.get_all_values()
-            if len(all_data) > 1:
-                contacts_sheet.delete_rows(2, len(all_data) - 1)
-        except:
-            contacts_sheet = workbook.add_worksheet(title=CONTACTS_SHEET_NAME, rows=1, cols=6)
-            contacts_sheet.append_row([
-                "Название канала", "Ссылка", "Email", "Telegram", "VK", "Скор"
-            ])
-        
-        for ch in contacts_list:
-            try:
-                contacts_sheet.append_row([
-                    ch.get("name", ""),
-                    ch.get("url", ""),
-                    ch.get("email", ""),
-                    ch.get("telegram", ""),
-                    ch.get("vk", ""),
-                    ch.get("score", 0)
-                ])
-            except:
-                pass
-        
-        format_contacts_sheet(contacts_sheet)
-        
-        return len(contacts_list)
-        
+        if requests:
+            sheet.spreadsheet.batch_update({"requests": requests})
+            
     except Exception as e:
-        logger.error(f"Ошибка обновления листа контактов: {e}")
-        return 0
+        logger.error(f"Ошибка форматирования: {e}")
 
-def update_sheet_with_analysis(workbook, channels_db):
-    try:
-        main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
-        
-        headers = main_sheet.row_values(1)
-        new_headers = [
-            "Название канала", "Ссылка", "Подписчики", "Тема",
-            "Найдено в видео", "ER (%)", "Дней неактивности",
-            "Telegram", "VK", "Скор"
-        ]
-        
-        if len(headers) < len(new_headers):
-            main_sheet.append_row(new_headers)
-            main_sheet.delete_row(1)
-            main_sheet.append_row(new_headers)
-            format_sheet(main_sheet)
-        
-        all_data = main_sheet.get_all_values()
-        for i, row in enumerate(all_data[1:], start=2):
-            if len(row) < 2:
-                continue
-            
-            channel_url = row[1]
-            channel_id = channel_url.split("/")[-1]
-            
-            if channel_id in channels_db:
-                data = channels_db[channel_id]
-                contacts = data.get("contacts", {})
-                
-                try:
-                    main_sheet.update_cell(i, 5, data.get("video_title", "")[:50])
-                    main_sheet.update_cell(i, 6, data.get("engagement_rate", 0))
-                    main_sheet.update_cell(i, 7, data.get("days_inactive", 999))
-                    main_sheet.update_cell(i, 8, contacts.get("telegram", ""))
-                    main_sheet.update_cell(i, 9, contacts.get("vk", ""))
-                    main_sheet.update_cell(i, 10, data.get("score", 0))
-                except:
-                    pass
-                
-                time.sleep(0.1)
-        
-        update_contacts_sheet(workbook, channels_db)
-        format_sheet(main_sheet)
-                
-    except Exception as e:
-        logger.error(f"Ошибка обновления таблицы: {e}")
+# ================= РАБОТА С БАЗОЙ ДАННЫХ =================
+def save_to_database(channels):
+    """Сохраняет каналы в локальную базу данных"""
+    db = load_channels_db()
+    for ch in channels:
+        channel_id = ch.get("channel_id")
+        if channel_id:
+            db[channel_id] = ch
+    save_channels_db(db)
+    return len(channels)
+
+def get_all_channels_from_db():
+    return load_channels_db()
+
+# ================= КЛАВИАТУРЫ =================
+def main_menu():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("🚀 Запустить парсер", callback_data="start_parser"),
+        InlineKeyboardButton("📊 Статистика", callback_data="show_status")
+    )
+    keyboard.add(
+        InlineKeyboardButton("🔍 Глубокий анализ", callback_data="deep_analysis"),
+        InlineKeyboardButton("🏆 ТОП кандидатов", callback_data="show_top")
+    )
+    keyboard.add(
+        InlineKeyboardButton("🔄 Проверить VK/TG", callback_data="check_vk_tg"),
+        InlineKeyboardButton("👑 Админ-панель", callback_data="admin_panel")
+    )
+    keyboard.add(
+        InlineKeyboardButton("💾 Сохранить настройки", callback_data="save_settings"),
+        InlineKeyboardButton("❓ Помощь", callback_data="show_help")
+    )
+    return keyboard
+
+def admin_menu():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("📋 Настройки", callback_data="show_settings"),
+        InlineKeyboardButton("👥 Пользователи", callback_data="users_menu")
+    )
+    keyboard.add(
+        InlineKeyboardButton("📌 Темы поиска", callback_data="topics_menu"),
+        InlineKeyboardButton("👤 Лимит подписчиков", callback_data="subs_menu")
+    )
+    keyboard.add(
+        InlineKeyboardButton("📈 Параметры анализа", callback_data="analysis_settings"),
+        InlineKeyboardButton("🔙 Назад", callback_data="back_main")
+    )
+    return keyboard
+
+def users_menu():
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("➕ Добавить пользователя", callback_data="add_user"),
+        InlineKeyboardButton("➖ Удалить пользователя", callback_data="remove_user")
+    )
+    keyboard.add(
+        InlineKeyboardButton("📋 Список пользователей", callback_data="list_users"),
+        InlineKeyboardButton("🔙 Назад", callback_data="back_admin")
+    )
+    return keyboard
+
+def topics_menu():
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton("➕ Добавить тему", callback_data="add_topic"),
+        InlineKeyboardButton("➖ Удалить тему", callback_data="remove_topic")
+    )
+    keyboard.add(
+        InlineKeyboardButton("📋 Список тем", callback_data="list_topics"),
+        InlineKeyboardButton("🔙 Назад", callback_data="back_admin")
+    )
+    return keyboard
+
+def subs_menu():
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(
+        InlineKeyboardButton("📈 Макс. подписчиков", callback_data="set_max_subs"),
+        InlineKeyboardButton("📉 Мин. подписчиков", callback_data="set_min_subs")
+    )
+    keyboard.add(
+        InlineKeyboardButton("10 000", callback_data="set_subs_10000"),
+        InlineKeyboardButton("50 000", callback_data="set_subs_50000"),
+        InlineKeyboardButton("100 000", callback_data="set_subs_100000")
+    )
+    keyboard.add(
+        InlineKeyboardButton("200 000", callback_data="set_subs_200000"),
+        InlineKeyboardButton("500 000", callback_data="set_subs_500000"),
+        InlineKeyboardButton("1 000 000", callback_data="set_subs_1000000")
+    )
+    keyboard.add(
+        InlineKeyboardButton("✏️ Своё значение", callback_data="set_subs_custom"),
+        InlineKeyboardButton("🔙 Назад", callback_data="back_admin")
+    )
+    return keyboard
+
+def analysis_settings_menu():
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton(f"📈 Мин. ER: {MIN_ENGAGEMENT_RATE}%", callback_data="set_min_er"),
+        InlineKeyboardButton(f"📊 Мин. рост: {MIN_GROWTH_RATE}%", callback_data="set_min_growth"),
+        InlineKeyboardButton(f"⏰ Макс. дней неактивности: {MAX_DAYS_INACTIVE}", callback_data="set_max_inactive"),
+        InlineKeyboardButton(f"⭐ Мин. скор для ТОПа: {MIN_SCORE_FOR_TOP}", callback_data="set_min_score")
+    )
+    keyboard.add(
+        InlineKeyboardButton("🔙 Назад", callback_data="back_admin")
+    )
+    return keyboard
+
+def cancel_button():
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton("❌ Отмена", callback_data="cancel"))
+    return keyboard
 
 # ================= ПРОВЕРКА ДОСТУПА =================
 def is_admin(user_id):
@@ -943,130 +522,147 @@ def is_user_allowed(user_id):
 def check_access(message):
     user_id = message.from_user.id
     if not is_user_allowed(user_id):
-        bot.send_message(message.chat.id, "❌ У вас нет доступа к этому боту.", reply_markup=main_keyboard())
+        bot.send_message(message.chat.id, "❌ У вас нет доступа к этому боту.")
         return False
     return True
 
-# ================= ОСНОВНЫЕ ФУНКЦИИ =================
-def run_parser(chat_id):
+# ================= ОСНОВНЫЕ ФУНКЦИИ БОТА =================
+def run_parser(chat_id, message_id):
+    """Запускает поиск каналов и создаёт публичные таблицы"""
     try:
-        bot.send_message(chat_id, "🔍 Ищу каналы...", reply_markup=main_keyboard())
-        
-        workbook = get_workbook()
-        if not workbook:
-            bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
-            return
+        bot.edit_message_text("📊 Создаю новые публичные таблицы...", chat_id, message_id)
         
         all_channels = []
+        table_links = []
+        
         for topic in SEARCH_TOPICS:
-            bot.send_message(chat_id, f"🔍 Ищу: {topic}...", reply_markup=main_keyboard())
-            channels = search_channels_by_topic(topic, 20)
-            all_channels.extend(channels)
+            bot.edit_message_text(f"🔍 Ищу: {topic}...", chat_id, message_id)
+            channels = search_channels_by_topic(topic, 15)
+            
+            if channels:
+                # Анализируем каждый канал
+                analyzed_channels = []
+                for ch in channels:
+                    analyzed = analyze_channel_deep(ch)
+                    analyzed_channels.append(analyzed)
+                
+                all_channels.extend(analyzed_channels)
+                
+                # Создаём новую публичную таблицу
+                workbook, main_sheet = create_public_workbook(topic)
+                if workbook and main_sheet:
+                    for ch in analyzed_channels:
+                        try:
+                            contacts = ch.get("contacts", {})
+                            row = [
+                                ch["name"],
+                                ch["url"],
+                                ch["subscribers"],
+                                ch["topic"],
+                                ch.get("engagement_rate", 0),
+                                ch.get("days_inactive", 999),
+                                contacts.get("email", ""),
+                                contacts.get("telegram", ""),
+                                contacts.get("vk", ""),
+                                ch.get("score", 0)
+                            ]
+                            main_sheet.append_row(row)
+                        except Exception as e:
+                            logger.error(f"Ошибка добавления строки: {e}")
+                    
+                    # Форматируем
+                    format_public_sheet(main_sheet)
+                    
+                    # Сохраняем ссылку
+                    sheet_url = f"https://docs.google.com/spreadsheets/d/{workbook.id}"
+                    table_links.append(f"📌 **{topic}**: {sheet_url}")
+                    
+                    # Отправляем ссылку сразу
+                    bot.send_message(
+                        chat_id,
+                        f"📊 **Отчёт по теме: {topic}**\n\n"
+                        f"📌 Найдено каналов: {len(analyzed_channels)}\n"
+                        f"🔗 Ссылка для всех: {sheet_url}\n\n"
+                        f"✅ Таблица публичная — доступна по ссылке!"
+                    )
+            
             time.sleep(1)
         
+        # Сохраняем в локальную базу
         if all_channels:
-            all_channels.sort(key=lambda x: x["subscribers"], reverse=True)
-            new_channels = save_to_sheets(workbook, all_channels)
+            saved = save_to_database(all_channels)
+            all_channels.sort(key=lambda x: x.get("subscribers", 0), reverse=True)
             
-            if new_channels:
-                sheet_url = f"https://docs.google.com/spreadsheets/d/{workbook.id}"
-                msg = f"✅ **Найдено {len(new_channels)} новых каналов!**\n\n"
-                msg += f"📊 Теперь запустите **Глубокий анализ** для оценки качества.\n\n"
-                msg += f"🔗 {sheet_url}"
-                bot.send_message(chat_id, msg, parse_mode='Markdown', reply_markup=main_keyboard())
-            else:
-                bot.send_message(chat_id, "⚠️ Новых каналов не найдено.", reply_markup=main_keyboard())
+            bot.edit_message_text(
+                f"✅ **Парсинг завершён!**\n\n"
+                f"📊 Всего найдено: **{len(all_channels)}** каналов\n"
+                f"📌 Создано таблиц: **{len(table_links)}**\n"
+                f"💾 Сохранено в базу: **{saved}**\n\n"
+                f"📋 Все таблицы публичные — доступны по ссылкам выше.",
+                chat_id, message_id, parse_mode='Markdown', reply_markup=main_menu()
+            )
         else:
-            bot.send_message(chat_id, "❌ Каналы не найдены.", reply_markup=main_keyboard())
+            bot.edit_message_text(
+                "❌ Каналы не найдены.\n\n"
+                "Проверьте:\n"
+                "• Настройки подписчиков\n"
+                "• Темы поиска\n"
+                "• Квоту YouTube API",
+                chat_id, message_id, reply_markup=main_menu()
+            )
+            
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка: {str(e)}", reply_markup=main_keyboard())
+        bot.edit_message_text(f"❌ Ошибка: {str(e)}", chat_id, message_id, reply_markup=main_menu())
 
-def run_deep_analysis(chat_id):
+def run_deep_analysis(chat_id, message_id):
+    """Глубокий анализ всех каналов в базе"""
     try:
-        bot.send_message(chat_id, "🔍 Запускаю глубокий анализ...\n\nЭто может занять несколько минут.", reply_markup=main_keyboard())
-        
-        workbook = get_workbook()
-        if not workbook:
-            bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
-            return
-        
-        main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
-        all_data = main_sheet.get_all_values()
-        
-        if len(all_data) <= 1:
-            bot.send_message(chat_id, "⚠️ Нет каналов для анализа. Сначала запустите парсер.", reply_markup=main_keyboard())
-            return
+        bot.edit_message_text("🔍 Запускаю глубокий анализ...\n\nЭто может занять несколько минут.", chat_id, message_id)
         
         channels_db = load_channels_db()
+        if not channels_db:
+            bot.edit_message_text("⚠️ Нет каналов в базе. Сначала запустите парсер.", chat_id, message_id, reply_markup=main_menu())
+            return
+        
         analyzed = 0
         found_contacts = 0
+        total = len(channels_db)
         
-        for i, row in enumerate(all_data[1:], start=2):
-            if len(row) < 2:
+        for ch_id, ch_data in channels_db.items():
+            if ch_data.get("analyzed"):
                 continue
             
-            channel_url = row[1]
-            channel_id = channel_url.split("/")[-1]
-            
-            if channel_id in channels_db and channels_db[channel_id].get("analyzed"):
-                continue
-            
-            channel_data = {
-                "channel_id": channel_id,
-                "name": row[0] if len(row) > 0 else "",
-                "url": row[1] if len(row) > 1 else "",
-                "subscribers": int(row[2]) if len(row) > 2 and row[2] else 0,
-                "topic": row[3] if len(row) > 3 else "",
-                "video_title": row[4] if len(row) > 4 else "",
-                "description": ""
-            }
-            
-            stats = get_channel_statistics(channel_id)
-            if stats:
-                channel_data["description"] = stats.get("description", "")
-            
-            analyzed_data = analyze_channel_deep(channel_data)
-            contacts = analyzed_data.get("contacts", {})
-            
-            if contacts.get("email") or contacts.get("telegram"):
-                found_contacts += 1
-            
-            channels_db[channel_id] = analyzed_data
+            analyzed_data = analyze_channel_deep(ch_data)
+            channels_db[ch_id] = analyzed_data
             analyzed += 1
             
+            if analyzed_data.get("contacts", {}).get("email") or analyzed_data.get("contacts", {}).get("telegram"):
+                found_contacts += 1
+            
             if analyzed % 3 == 0:
-                bot.send_message(chat_id, f"🔍 Проанализировано {analyzed} каналов...", reply_markup=main_keyboard())
+                bot.edit_message_text(f"🔍 Проанализировано {analyzed} из {total} каналов...", chat_id, message_id)
             
             save_channels_db(channels_db)
             time.sleep(0.5)
         
         save_channels_db(channels_db)
-        update_sheet_with_analysis(workbook, channels_db)
         
         msg = f"✅ **Глубокий анализ завершён!**\n\n"
         msg += f"📊 Проанализировано: **{analyzed}** каналов\n"
         msg += f"📧 Найдено контактов: **{found_contacts}**\n\n"
-        msg += f"📋 В таблице создан отдельный лист **«Контакты»** с каналами, у которых есть контакты.\n\n"
         msg += f"🏆 Нажмите **ТОП кандидатов** для просмотра лучших вариантов."
         
-        bot.send_message(chat_id, msg, parse_mode='Markdown', reply_markup=main_keyboard())
+        bot.edit_message_text(msg, chat_id, message_id, parse_mode='Markdown', reply_markup=main_menu())
         
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка: {str(e)}", reply_markup=main_keyboard())
+        bot.edit_message_text(f"❌ Ошибка: {str(e)}", chat_id, message_id, reply_markup=main_menu())
 
-def show_top_candidates(chat_id):
+def show_top_candidates(chat_id, message_id):
+    """Показывает ТОП кандидатов для сотрудничества"""
     try:
         channels_db = load_channels_db()
-        
         if not channels_db:
-            bot.send_message(
-                chat_id,
-                "⚠️ Нет данных для анализа.\n\n"
-                "Сначала запустите:\n"
-                "1. 🚀 Парсер\n"
-                "2. 🔍 Глубокий анализ",
-                reply_markup=main_keyboard()
-            )
+            bot.edit_message_text("⚠️ Нет данных для анализа. Сначала запустите парсер и глубокий анализ.", chat_id, message_id, reply_markup=main_menu())
             return
         
         candidates = []
@@ -1074,27 +670,21 @@ def show_top_candidates(chat_id):
             score = data.get("score", 0)
             er = data.get("engagement_rate", 0)
             days = data.get("days_inactive", 999)
-            
-            if (score >= MIN_SCORE_FOR_TOP and 
-                er >= MIN_ENGAGEMENT_RATE and 
-                days <= MAX_DAYS_INACTIVE):
+            if score >= MIN_SCORE_FOR_TOP and er >= MIN_ENGAGEMENT_RATE and days <= MAX_DAYS_INACTIVE:
                 candidates.append(data)
         
         if not candidates:
-            bot.send_message(
-                chat_id,
-                "❌ Кандидатов не найдено.\n\n"
-                f"Попробуйте снизить порог в настройках:\n"
+            bot.edit_message_text(
+                f"❌ Кандидатов не найдено.\n\n"
+                f"Попробуйте снизить порог:\n"
                 f"• Мин. скор: {MIN_SCORE_FOR_TOP}\n"
                 f"• Мин. ER: {MIN_ENGAGEMENT_RATE}%\n"
                 f"• Макс. неактивность: {MAX_DAYS_INACTIVE} дн",
-                parse_mode='Markdown',
-                reply_markup=main_keyboard()
+                chat_id, message_id, parse_mode='Markdown', reply_markup=main_menu()
             )
             return
         
         candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
-        
         msg = "🏆 **ТОП КАНДИДАТЫ ДЛЯ СОТРУДНИЧЕСТВА**\n\n"
         
         for i, c in enumerate(candidates[:10], 1):
@@ -1104,101 +694,64 @@ def show_top_candidates(chat_id):
             msg += f"   👥 Подписчиков: {c.get('subscribers', 0):,}\n"
             msg += f"   📈 ER: {c.get('engagement_rate', 0)}%\n"
             msg += f"   ⏰ Дней без видео: {c.get('days_inactive', 999)}\n"
-            
             if contacts.get("email"):
                 msg += f"   📧 Email: `{contacts['email']}`\n"
             if contacts.get("telegram"):
                 msg += f"   💬 Telegram: {contacts['telegram']}\n"
             if contacts.get("vk"):
                 msg += f"   🎯 VK: {contacts['vk']}\n"
-            
             msg += f"   🔗 {c.get('url', '')}\n\n"
         
         if len(candidates) > 10:
             msg += f"\n... и ещё {len(candidates) - 10} кандидатов.\n"
-            msg += f"📋 Всего найдено: **{len(candidates)}** каналов"
+        msg += f"📋 Всего найдено: **{len(candidates)}** каналов"
         
-        bot.send_message(chat_id, msg, parse_mode='Markdown', reply_markup=main_keyboard())
+        bot.edit_message_text(msg, chat_id, message_id, parse_mode='Markdown', reply_markup=main_menu())
         
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка: {str(e)}", reply_markup=main_keyboard())
+        bot.edit_message_text(f"❌ Ошибка: {str(e)}", chat_id, message_id, reply_markup=main_menu())
 
-def check_vk_tg(chat_id):
+def check_vk_tg(chat_id, message_id):
+    """Перепроверяет ссылки VK и Telegram в базе"""
     try:
-        workbook = get_workbook()
-        if not workbook:
-            bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
+        bot.edit_message_text("🔄 Проверяю ссылки VK и Telegram...", chat_id, message_id)
+        
+        channels_db = load_channels_db()
+        if not channels_db:
+            bot.edit_message_text("⚠️ Нет каналов в базе.", chat_id, message_id, reply_markup=main_menu())
             return
-        
-        main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
-        all_data = main_sheet.get_all_values()
-        
-        if len(all_data) <= 1:
-            bot.send_message(chat_id, "⚠️ В таблице нет каналов.", reply_markup=main_keyboard())
-            return
-        
-        bot.send_message(chat_id, "🔄 Проверяю ссылки VK и Telegram...", reply_markup=main_keyboard())
         
         updated = 0
-        channels_db = load_channels_db()
-        
-        for i, row in enumerate(all_data[1:], start=2):
-            if len(row) < 2:
-                continue
+        for ch_id, data in channels_db.items():
+            description = data.get("description", "")
+            contacts = extract_links(description)
             
-            channel_url = row[1]
-            channel_id = channel_url.split("/")[-1]
-            
-            if channel_id in channels_db:
-                contacts = channels_db[channel_id].get("contacts", {})
-                vk = contacts.get("vk", "")
-                tg = contacts.get("telegram", "")
-                
-                if vk:
-                    try:
-                        main_sheet.update_cell(i, 9, vk)
-                        updated += 1
-                    except:
-                        pass
-                if tg:
-                    try:
-                        main_sheet.update_cell(i, 8, tg)
-                        updated += 1
-                    except:
-                        pass
-                
-                time.sleep(0.1)
+            old_contacts = data.get("contacts", {})
+            if contacts.get("vk") != old_contacts.get("vk") or contacts.get("telegram") != old_contacts.get("telegram"):
+                data["contacts"] = contacts
+                channels_db[ch_id] = data
+                updated += 1
         
-        contacts_count = update_contacts_sheet(workbook, channels_db)
-        
-        bot.send_message(
-            chat_id,
+        save_channels_db(channels_db)
+        bot.edit_message_text(
             f"✅ Проверка завершена!\n\n"
-            f"📊 Обновлено ссылок: **{updated}**\n"
-            f"📋 Лист «Контакты» обновлён: **{contacts_count}** каналов",
-            parse_mode='Markdown',
-            reply_markup=main_keyboard()
+            f"📊 Обновлено каналов: **{updated}**",
+            chat_id, message_id, reply_markup=main_menu()
         )
         
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка: {str(e)}", reply_markup=main_keyboard())
+        bot.edit_message_text(f"❌ Ошибка: {str(e)}", chat_id, message_id, reply_markup=main_menu())
 
-def show_status(chat_id):
+def show_status(chat_id, message_id):
+    """Показывает статистику"""
     try:
-        workbook = get_workbook()
-        if not workbook:
-            bot.send_message(chat_id, "❌ Таблица не найдена!", reply_markup=main_keyboard())
-            return
-        
-        main_sheet = workbook.worksheet(MAIN_SHEET_NAME)
-        total = len(main_sheet.get_all_values()) - 1
-        
         channels_db = load_channels_db()
+        total = len(channels_db)
         analyzed = len([c for c in channels_db.values() if c.get("analyzed")])
         with_contacts = len([c for c in channels_db.values() if c.get("contacts", {}).get("email") or c.get("contacts", {}).get("telegram")])
         
         msg = f"📊 **СТАТИСТИКА**\n\n"
-        msg += f"📋 Всего каналов: **{total}**\n"
+        msg += f"📋 Всего каналов в базе: **{total}**\n"
         msg += f"🔍 Проанализировано: **{analyzed}**\n"
         msg += f"📧 Найдено контактов: **{with_contacts}**\n\n"
         msg += f"📌 Активных тем: **{len(SEARCH_TOPICS)}**\n"
@@ -1207,283 +760,64 @@ def show_status(chat_id):
         msg += f"• Мин. подписчиков: {MIN_SUBSCRIBERS}\n"
         msg += f"• Макс. подписчиков: {MAX_SUBSCRIBERS}\n"
         msg += f"• Мин. ER: {MIN_ENGAGEMENT_RATE}%\n"
-        msg += f"• Мин. скор для ТОПа: {MIN_SCORE_FOR_TOP}\n\n"
-        msg += f"🔗 {workbook.url}"
+        msg += f"• Мин. скор для ТОПа: {MIN_SCORE_FOR_TOP}"
         
-        bot.send_message(chat_id, msg, parse_mode='Markdown', reply_markup=main_keyboard())
+        bot.edit_message_text(msg, chat_id, message_id, parse_mode='Markdown', reply_markup=main_menu())
         
     except Exception as e:
-        bot.send_message(chat_id, f"❌ Ошибка: {str(e)}", reply_markup=main_keyboard())
+        bot.edit_message_text(f"❌ Ошибка: {str(e)}", chat_id, message_id, reply_markup=main_menu())
 
-# ================= ОБРАБОТЧИКИ =================
-@bot.message_handler(commands=['start'])
-def handle_start(message):
-    if not check_access(message):
-        return
-    bot.send_message(
-        message.chat.id,
-        f"👋 Привет, {message.from_user.first_name}!\n\n"
-        "🤖 **Партнёрский ассистент для YouTube**\n\n"
-        "Что я умею:\n"
-        "• 🔍 Искать каналы по темам RP\n"
-        "• 📊 Анализировать вовлеченность (ER)\n"
-        "• 🏆 Отбирать лучшие каналы по рейтингу\n"
-        "• 📧 Находить контакты для связи\n\n"
-        "📋 В таблице создаётся отдельный лист **«Контакты»** с каналами, у которых есть контакты.\n\n"
-        "Выберите действие с помощью кнопок ниже:",
-        parse_mode='Markdown',
-        reply_markup=main_keyboard()
-    )
-
-@bot.message_handler(func=lambda message: True)
-def handle_text(message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    text = message.text.strip()
+# ================= ОБРАБОТЧИКИ CALLBACK =================
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
     
     if not is_user_allowed(user_id):
-        bot.send_message(chat_id, "❌ У вас нет доступа к этому боту.", reply_markup=main_keyboard())
+        bot.answer_callback_query(call.id, "❌ У вас нет доступа!", show_alert=True)
         return
     
-    if user_id in user_states:
-        state = user_states[user_id]
-        
-        if state == "waiting_max_subs":
-            try:
-                new_value = int(text)
-                if new_value <= 0:
-                    bot.send_message(chat_id, "❌ Число должно быть > 0.", reply_markup=admin_keyboard())
-                    return
-                s = load_settings()
-                s["max_subscribers"] = new_value
-                save_settings(s)
-                update_global_settings()
-                del user_states[user_id]
-                bot.send_message(chat_id, f"✅ Макс. подписчиков: {new_value}", reply_markup=admin_keyboard())
-            except ValueError:
-                bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
-            return
-        
-        if state == "waiting_min_subs":
-            try:
-                new_value = int(text)
-                if new_value < 0:
-                    bot.send_message(chat_id, "❌ Число должно быть >= 0.", reply_markup=admin_keyboard())
-                    return
-                s = load_settings()
-                s["min_subscribers"] = new_value
-                save_settings(s)
-                update_global_settings()
-                del user_states[user_id]
-                bot.send_message(chat_id, f"✅ Мин. подписчиков: {new_value}", reply_markup=admin_keyboard())
-            except ValueError:
-                bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
-            return
-        
-        if state == "waiting_add_user":
-            try:
-                new_id = int(text)
-                if new_id in ALLOWED_USER_IDS:
-                    bot.send_message(chat_id, f"⚠️ ID {new_id} уже есть.", reply_markup=admin_keyboard())
-                    return
-                ALLOWED_USER_IDS.append(new_id)
-                s = load_settings()
-                s["allowed_users"] = ALLOWED_USER_IDS
-                save_settings(s)
-                update_global_settings()
-                del user_states[user_id]
-                bot.send_message(chat_id, f"✅ Пользователь {new_id} добавлен!", reply_markup=admin_keyboard())
-            except ValueError:
-                bot.send_message(chat_id, "❌ Введите корректный ID.", reply_markup=admin_keyboard())
-            return
-        
-        if state == "waiting_remove_user":
-            try:
-                remove_id = int(text)
-                if remove_id == ALLOWED_USER_IDS[0]:
-                    bot.send_message(chat_id, "❌ Нельзя удалить создателя.", reply_markup=admin_keyboard())
-                    return
-                if remove_id not in ALLOWED_USER_IDS:
-                    bot.send_message(chat_id, f"⚠️ ID {remove_id} не найден.", reply_markup=admin_keyboard())
-                    return
-                ALLOWED_USER_IDS.remove(remove_id)
-                s = load_settings()
-                s["allowed_users"] = ALLOWED_USER_IDS
-                save_settings(s)
-                update_global_settings()
-                del user_states[user_id]
-                bot.send_message(chat_id, f"✅ Пользователь {remove_id} удалён!", reply_markup=admin_keyboard())
-            except ValueError:
-                bot.send_message(chat_id, "❌ Введите корректный ID.", reply_markup=admin_keyboard())
-            return
-        
-        if state == "waiting_add_topic":
-            if text in SEARCH_TOPICS:
-                bot.send_message(chat_id, f"⚠️ Тема '{text}' уже есть.", reply_markup=admin_keyboard())
-                return
-            SEARCH_TOPICS.append(text)
-            s = load_settings()
-            s["search_topics"] = SEARCH_TOPICS
-            save_settings(s)
-            update_global_settings()
-            del user_states[user_id]
-            bot.send_message(chat_id, f"✅ Тема '{text}' добавлена!", reply_markup=admin_keyboard())
-            return
-        
-        if state == "waiting_remove_topic":
-            if text not in SEARCH_TOPICS:
-                bot.send_message(chat_id, f"⚠️ Тема '{text}' не найдена.", reply_markup=admin_keyboard())
-                return
-            SEARCH_TOPICS.remove(text)
-            s = load_settings()
-            s["search_topics"] = SEARCH_TOPICS
-            save_settings(s)
-            update_global_settings()
-            del user_states[user_id]
-            bot.send_message(chat_id, f"✅ Тема '{text}' удалена!", reply_markup=admin_keyboard())
-            return
-        
-        if state == "waiting_min_er":
-            try:
-                new_value = float(text)
-                if new_value < 0:
-                    bot.send_message(chat_id, "❌ Значение должно быть >= 0.", reply_markup=admin_keyboard())
-                    return
-                s = load_settings()
-                s["min_engagement_rate"] = new_value
-                save_settings(s)
-                update_global_settings()
-                del user_states[user_id]
-                bot.send_message(chat_id, f"✅ Мин. ER: {new_value}%", reply_markup=admin_keyboard())
-            except ValueError:
-                bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
-            return
-        
-        if state == "waiting_min_growth":
-            try:
-                new_value = float(text)
-                if new_value < 0:
-                    bot.send_message(chat_id, "❌ Значение должно быть >= 0.", reply_markup=admin_keyboard())
-                    return
-                s = load_settings()
-                s["min_growth_rate"] = new_value
-                save_settings(s)
-                update_global_settings()
-                del user_states[user_id]
-                bot.send_message(chat_id, f"✅ Мин. рост: {new_value}%", reply_markup=admin_keyboard())
-            except ValueError:
-                bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
-            return
-        
-        if state == "waiting_max_inactive":
-            try:
-                new_value = int(text)
-                if new_value < 0:
-                    bot.send_message(chat_id, "❌ Значение должно быть >= 0.", reply_markup=admin_keyboard())
-                    return
-                s = load_settings()
-                s["max_days_inactive"] = new_value
-                save_settings(s)
-                update_global_settings()
-                del user_states[user_id]
-                bot.send_message(chat_id, f"✅ Макс. неактивность: {new_value} дн", reply_markup=admin_keyboard())
-            except ValueError:
-                bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
-            return
-        
-        if state == "waiting_min_score":
-            try:
-                new_value = int(text)
-                if new_value < 0 or new_value > 100:
-                    bot.send_message(chat_id, "❌ Значение должно быть от 0 до 100.", reply_markup=admin_keyboard())
-                    return
-                s = load_settings()
-                s["min_score_for_top"] = new_value
-                save_settings(s)
-                update_global_settings()
-                del user_states[user_id]
-                bot.send_message(chat_id, f"✅ Мин. скор для ТОПа: {new_value}", reply_markup=admin_keyboard())
-            except ValueError:
-                bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
-            return
-        
-        del user_states[user_id]
-        bot.send_message(chat_id, "⏳ Время ожидания истекло. Используйте кнопки.", reply_markup=main_keyboard())
+    if call.data == "back_main":
+        bot.edit_message_text("👋 Главное меню:", chat_id, call.message.message_id, reply_markup=main_menu())
+        bot.answer_callback_query(call.id)
         return
     
-    # --- ОБРАБОТКА КНОПОК ---
-    
-    if text == "🔙 Назад":
-        bot.send_message(chat_id, "👋 Главное меню:", reply_markup=main_keyboard())
+    if call.data == "back_admin":
+        bot.edit_message_text("👑 **АДМИН-ПАНЕЛЬ**", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=admin_menu())
+        bot.answer_callback_query(call.id)
         return
     
-    if text == "🚀 Запустить парсер":
-        run_parser(chat_id)
+    if call.data == "start_parser":
+        bot.answer_callback_query(call.id, "🚀 Запускаю парсер...")
+        run_parser(chat_id, call.message.message_id)
         return
     
-    if text == "📊 Статистика":
-        show_status(chat_id)
+    if call.data == "show_status":
+        bot.answer_callback_query(call.id)
+        show_status(chat_id, call.message.message_id)
         return
     
-    if text == "🔍 Глубокий анализ":
-        run_deep_analysis(chat_id)
+    if call.data == "deep_analysis":
+        bot.answer_callback_query(call.id, "🔍 Запускаю глубокий анализ...")
+        run_deep_analysis(chat_id, call.message.message_id)
         return
     
-    if text == "🏆 ТОП кандидатов":
-        show_top_candidates(chat_id)
+    if call.data == "show_top":
+        bot.answer_callback_query(call.id)
+        show_top_candidates(chat_id, call.message.message_id)
         return
     
-    if text == "🔄 Проверить VK/TG":
-        check_vk_tg(chat_id)
+    if call.data == "check_vk_tg":
+        bot.answer_callback_query(call.id, "🔄 Проверяю...")
+        check_vk_tg(chat_id, call.message.message_id)
         return
     
-    if text == "🔄 Обновить таблицу":
-        refresh_sheet(chat_id)
-        return
-    
-    if text == "💾 Сохранить настройки":
-        update_global_settings()
-        bot.send_message(chat_id, "✅ Настройки синхронизированы и сохранены!", reply_markup=main_keyboard())
-        return
-    
-    if text == "❓ Помощь":
-        help_text = """
-🤖 **Помощь**
-
-**Основные функции:**
-
-🚀 **Запустить парсер** — поиск новых каналов по темам
-
-📊 **Глубокий анализ** — анализ ER, активности, поиск контактов
-
-🏆 **ТОП кандидатов** — список лучших каналов для сотрудничества
-
-🔄 **Проверить VK/TG** — обновление ссылок в таблице
-
-🔄 **Обновить таблицу** — пересоздать таблицу из всех листов
-
-👑 **Админ-панель** — управление настройками
-
-📋 **В таблице Google Sheets**:
-• Основной лист: все каналы с рейтингом
-• Лист «Контакты»: только каналы с найденными контактами
-
-**Как это работает:**
-1. Запускаете парсер → бот ищет каналы
-2. Делаете глубокий анализ → бот считает ER, находит контакты
-3. Смотрите ТОП кандидатов → выбираете лучших
-4. Пишете им вручную → сотрудничество!
-        """
-        bot.send_message(chat_id, help_text, parse_mode='Markdown', reply_markup=main_keyboard())
-        return
-    
-    # --- АДМИН-ПАНЕЛЬ ---
-    if text == "👑 Админ-панель":
+    if call.data == "admin_panel":
         if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=main_keyboard())
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
             return
-        bot.send_message(
-            chat_id,
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(
             f"👑 **АДМИН-ПАНЕЛЬ**\n\n"
             f"📊 Настройки:\n"
             f"• Мин. подписчиков: `{MIN_SUBSCRIBERS}`\n"
@@ -1491,18 +825,41 @@ def handle_text(message):
             f"• Мин. ER: `{MIN_ENGAGEMENT_RATE}%`\n"
             f"• Мин. скор для ТОПа: `{MIN_SCORE_FOR_TOP}`\n\n"
             "Выберите раздел:",
-            parse_mode='Markdown',
-            reply_markup=admin_keyboard()
+            chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=admin_menu()
         )
         return
     
-    # --- НАСТРОЙКИ ---
-    if text == "📋 Настройки":
+    if call.data == "save_settings":
+        update_global_settings()
+        bot.answer_callback_query(call.id, "✅ Настройки сохранены!")
+        bot.edit_message_text("✅ Настройки синхронизированы и сохранены!", chat_id, call.message.message_id, reply_markup=main_menu())
+        return
+    
+    if call.data == "show_help":
+        bot.answer_callback_query(call.id)
+        help_text = """
+🤖 **Помощь**
+
+🚀 **Запустить парсер** — поиск каналов + создание публичных таблиц
+📊 **Статистика** — текущие данные
+🔍 **Глубокий анализ** — ER, контакты, скор
+🏆 **ТОП кандидатов** — лучшие для сотрудничества
+🔄 **Проверить VK/TG** — обновление ссылок
+👑 **Админ-панель** — управление настройками
+
+📌 Все таблицы создаются с публичным доступом!
+"""
+        bot.edit_message_text(help_text, chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=main_menu())
+        return
+    
+    # ========== АДМИН-КОМАНДЫ ==========
+    if call.data == "show_settings":
         if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=main_keyboard())
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
             return
+        bot.answer_callback_query(call.id)
         s = load_settings()
-        text_msg = (
+        text = (
             "📊 **НАСТРОЙКИ**\n\n"
             f"👥 Пользователей: {len(s.get('allowed_users', []))}\n"
             f"📌 Тем: {', '.join(s.get('search_topics', []))}\n"
@@ -1513,246 +870,370 @@ def handle_text(message):
             f"⏰ Макс. неактивность: {s.get('max_days_inactive', 30)} дн\n"
             f"⭐ Мин. скор для ТОПа: {s.get('min_score_for_top', 65)}"
         )
-        bot.send_message(chat_id, text_msg, parse_mode='Markdown', reply_markup=admin_keyboard())
+        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=admin_menu())
         return
     
-    # --- ПОЛЬЗОВАТЕЛИ ---
-    if text == "👥 Пользователи":
+    if call.data == "users_menu":
         if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=main_keyboard())
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
             return
-        text_msg = "👥 **Управление пользователями**\n\n"
-        for i, uid in enumerate(ALLOWED_USER_IDS, 1):
-            is_creator = "👑 " if i == 1 else ""
-            text_msg += f"{i}. {is_creator}`{uid}`\n"
-        text_msg += "\nВведите:\n• `add ID` — добавить пользователя\n• `remove ID` — удалить пользователя"
-        bot.send_message(chat_id, text_msg, parse_mode='Markdown', reply_markup=admin_keyboard())
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(f"👥 **Управление пользователями**\n\nВсего: {len(ALLOWED_USER_IDS)}", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=users_menu())
         return
     
-    # --- ТЕМЫ ---
-    if text == "📌 Темы поиска":
+    if call.data == "add_user":
         if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=main_keyboard())
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
             return
-        text_msg = "📌 **Управление темами**\n\n"
-        text_msg += f"Текущие темы:\n" + "\n".join([f"• {t}" for t in SEARCH_TOPICS])
-        text_msg += "\n\nВведите:\n• `add тема` — добавить тему\n• `remove тема` — удалить тему"
-        bot.send_message(chat_id, text_msg, parse_mode='Markdown', reply_markup=admin_keyboard())
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text("✏️ Введите ID пользователя:\n\nПример: `123456789`", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button())
+        user_states[user_id] = "waiting_add_user"
         return
     
-    # --- ЛИМИТ ПОДПИСЧИКОВ ---
-    if text == "👤 Лимит подписчиков":
+    if call.data == "remove_user":
         if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=main_keyboard())
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
             return
-        bot.send_message(
-            chat_id,
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(
+            f"✏️ Введите ID пользователя для удаления\n\n⚠️ Нельзя удалить создателя: `{ALLOWED_USER_IDS[0]}`",
+            chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button()
+        )
+        user_states[user_id] = "waiting_remove_user"
+        return
+    
+    if call.data == "list_users":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        text = "📋 **Список пользователей**\n\n" + "\n".join([f"{i}. {'👑 ' if i == 1 else ''}`{uid}`" for i, uid in enumerate(ALLOWED_USER_IDS, 1)])
+        bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=users_menu())
+        return
+    
+    if call.data == "topics_menu":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(f"📌 **Управление темами**\n\nТемы: {', '.join(SEARCH_TOPICS)}", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=topics_menu())
+        return
+    
+    if call.data == "add_topic":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text("✏️ Введите новую тему:\n\nПример: `GTA 5 RP`", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button())
+        user_states[user_id] = "waiting_add_topic"
+        return
+    
+    if call.data == "remove_topic":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(
+            f"✏️ Введите тему для удаления\n\nТекущие темы:\n" + "\n".join([f"• {t}" for t in SEARCH_TOPICS]),
+            chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button()
+        )
+        user_states[user_id] = "waiting_remove_topic"
+        return
+    
+    if call.data == "list_topics":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        text = "📌 **Список тем**\n\n" + "\n".join([f"{i}. {t}" for i, t in enumerate(SEARCH_TOPICS, 1)])
+        bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=topics_menu())
+        return
+    
+    if call.data == "subs_menu":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(
             f"👤 **Лимит подписчиков**\n\n"
             f"Текущий мин: `{MIN_SUBSCRIBERS}`\n"
-            f"Текущий макс: `{MAX_SUBSCRIBERS}`\n\n"
-            "Введите:\n• `max 100000` — установить максимум\n• `min 1000` — установить минимум",
-            parse_mode='Markdown',
-            reply_markup=admin_keyboard()
+            f"Текущий макс: `{MAX_SUBSCRIBERS}`",
+            chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=subs_menu()
         )
         return
     
-    # --- ПАРАМЕТРЫ АНАЛИЗА ---
-    if text == "📈 Параметры анализа":
+    if call.data == "set_max_subs":
         if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=main_keyboard())
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
             return
-        bot.send_message(
-            chat_id,
-            f"📈 **Параметры анализа**\n\n"
-            f"• Мин. ER: `{MIN_ENGAGEMENT_RATE}%`\n"
-            f"• Мин. рост: `{MIN_GROWTH_RATE}%`\n"
-            f"• Макс. неактивность: `{MAX_DAYS_INACTIVE}` дн\n"
-            f"• Мин. скор для ТОПа: `{MIN_SCORE_FOR_TOP}`\n\n"
-            "Введите:\n"
-            "• `er 5` — мин. ER\n"
-            "• `growth 10` — мин. рост\n"
-            "• `inactive 14` — макс. неактивность\n"
-            "• `score 70` — мин. скор для ТОПа",
-            parse_mode='Markdown',
-            reply_markup=admin_keyboard()
-        )
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text("✏️ Введите новое значение МАКС. подписчиков:\n\nПример: `100000`", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button())
+        user_states[user_id] = "waiting_max_subs"
         return
     
-    # --- КОМАНДЫ ЧЕРЕЗ ТЕКСТ ---
-    if text.startswith("add "):
+    if call.data == "set_min_subs":
         if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=admin_keyboard())
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
             return
-        potential_topic = text.replace("add ", "").strip()
-        if potential_topic.isdigit():
-            try:
-                new_id = int(potential_topic)
-                if new_id in ALLOWED_USER_IDS:
-                    bot.send_message(chat_id, f"⚠️ ID {new_id} уже есть.", reply_markup=admin_keyboard())
-                    return
-                ALLOWED_USER_IDS.append(new_id)
-                s = load_settings()
-                s["allowed_users"] = ALLOWED_USER_IDS
-                save_settings(s)
-                update_global_settings()
-                bot.send_message(chat_id, f"✅ Пользователь {new_id} добавлен!", reply_markup=admin_keyboard())
-            except ValueError:
-                bot.send_message(chat_id, "❌ Введите корректный ID.", reply_markup=admin_keyboard())
-        else:
-            if potential_topic in SEARCH_TOPICS:
-                bot.send_message(chat_id, f"⚠️ Тема '{potential_topic}' уже есть.", reply_markup=admin_keyboard())
-                return
-            SEARCH_TOPICS.append(potential_topic)
-            s = load_settings()
-            s["search_topics"] = SEARCH_TOPICS
-            save_settings(s)
-            update_global_settings()
-            bot.send_message(chat_id, f"✅ Тема '{potential_topic}' добавлена!", reply_markup=admin_keyboard())
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text("✏️ Введите новое значение МИН. подписчиков:\n\nПример: `1000`", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button())
+        user_states[user_id] = "waiting_min_subs"
         return
     
-    if text.startswith("remove "):
+    if call.data.startswith("set_subs_"):
         if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=admin_keyboard())
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
             return
-        potential = text.replace("remove ", "").strip()
-        if potential.isdigit():
-            try:
-                remove_id = int(potential)
-                if remove_id == ALLOWED_USER_IDS[0]:
-                    bot.send_message(chat_id, "❌ Нельзя удалить создателя.", reply_markup=admin_keyboard())
-                    return
-                if remove_id not in ALLOWED_USER_IDS:
-                    bot.send_message(chat_id, f"⚠️ ID {remove_id} не найден.", reply_markup=admin_keyboard())
-                    return
-                ALLOWED_USER_IDS.remove(remove_id)
-                s = load_settings()
-                s["allowed_users"] = ALLOWED_USER_IDS
-                save_settings(s)
-                update_global_settings()
-                bot.send_message(chat_id, f"✅ Пользователь {remove_id} удалён!", reply_markup=admin_keyboard())
-            except ValueError:
-                bot.send_message(chat_id, "❌ Введите корректный ID.", reply_markup=admin_keyboard())
-        else:
-            if potential not in SEARCH_TOPICS:
-                bot.send_message(chat_id, f"⚠️ Тема '{potential}' не найдена.", reply_markup=admin_keyboard())
-                return
-            SEARCH_TOPICS.remove(potential)
-            s = load_settings()
-            s["search_topics"] = SEARCH_TOPICS
-            save_settings(s)
-            update_global_settings()
-            bot.send_message(chat_id, f"✅ Тема '{potential}' удалена!", reply_markup=admin_keyboard())
-        return
-    
-    if text.startswith("max "):
-        if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=admin_keyboard())
+        value_str = call.data.replace("set_subs_", "")
+        if value_str == "custom":
+            bot.answer_callback_query(call.id)
+            bot.edit_message_text("✏️ Введите новое значение МАКС. подписчиков:\n\nПример: `100000`", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button())
+            user_states[user_id] = "waiting_max_subs"
             return
         try:
-            new_value = int(text.replace("max ", "").strip())
+            new_value = int(value_str)
+            s = load_settings()
+            s["max_subscribers"] = new_value
+            save_settings(s)
+            update_global_settings()
+            bot.answer_callback_query(call.id, f"✅ Установлено: {new_value}")
+            bot.edit_message_text(f"✅ Макс. подписчиков: `{new_value}`", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=admin_menu())
+        except:
+            bot.answer_callback_query(call.id, "❌ Ошибка!", show_alert=True)
+        return
+    
+    if call.data == "analysis_settings":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(
+            "📈 **НАСТРОЙКИ АНАЛИЗА**\n\n"
+            "Выберите параметр для изменения:",
+            chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=analysis_settings_menu()
+        )
+        return
+    
+    if call.data == "set_min_er":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(f"✏️ Введите минимальный ER (%)\n\nТекущее: {MIN_ENGAGEMENT_RATE}%", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button())
+        user_states[user_id] = "waiting_min_er"
+        return
+    
+    if call.data == "set_min_growth":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(f"✏️ Введите минимальный рост (%)\n\nТекущее: {MIN_GROWTH_RATE}%", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button())
+        user_states[user_id] = "waiting_min_growth"
+        return
+    
+    if call.data == "set_max_inactive":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(f"✏️ Введите макс. дней без видео\n\nТекущее: {MAX_DAYS_INACTIVE} дн", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button())
+        user_states[user_id] = "waiting_max_inactive"
+        return
+    
+    if call.data == "set_min_score":
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "❌ Только для создателя!", show_alert=True)
+            return
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(f"✏️ Введите мин. скор для ТОПа\n\nТекущее: {MIN_SCORE_FOR_TOP}", chat_id, call.message.message_id, parse_mode='Markdown', reply_markup=cancel_button())
+        user_states[user_id] = "waiting_min_score"
+        return
+    
+    if call.data == "cancel":
+        if user_id in user_states:
+            del user_states[user_id]
+        bot.answer_callback_query(call.id, "❌ Отменено")
+        bot.edit_message_text("✅ Действие отменено.", chat_id, call.message.message_id, reply_markup=admin_menu())
+        return
+
+# ================= ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ =================
+@bot.message_handler(func=lambda message: True)
+def handle_text_messages(message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    if not is_user_allowed(user_id):
+        bot.send_message(chat_id, "❌ У вас нет доступа.")
+        return
+    
+    if user_id not in user_states:
+        bot.send_message(chat_id, "Используйте кнопки меню:", reply_markup=main_menu())
+        return
+    
+    state = user_states[user_id]
+    text = message.text.strip()
+    
+    if state == "waiting_add_user":
+        try:
+            new_id = int(text)
+            if new_id in ALLOWED_USER_IDS:
+                bot.send_message(chat_id, f"⚠️ ID {new_id} уже есть.")
+                return
+            ALLOWED_USER_IDS.append(new_id)
+            s = load_settings()
+            s["allowed_users"] = ALLOWED_USER_IDS
+            save_settings(s)
+            update_global_settings()
+            del user_states[user_id]
+            bot.send_message(chat_id, f"✅ Пользователь {new_id} добавлен!", reply_markup=admin_menu())
+        except ValueError:
+            bot.send_message(chat_id, "❌ Введите корректный ID.")
+        return
+    
+    if state == "waiting_remove_user":
+        try:
+            remove_id = int(text)
+            if remove_id == ALLOWED_USER_IDS[0]:
+                bot.send_message(chat_id, "❌ Нельзя удалить создателя.")
+                return
+            if remove_id not in ALLOWED_USER_IDS:
+                bot.send_message(chat_id, f"⚠️ ID {remove_id} не найден.")
+                return
+            ALLOWED_USER_IDS.remove(remove_id)
+            s = load_settings()
+            s["allowed_users"] = ALLOWED_USER_IDS
+            save_settings(s)
+            update_global_settings()
+            del user_states[user_id]
+            bot.send_message(chat_id, f"✅ Пользователь {remove_id} удалён!", reply_markup=admin_menu())
+        except ValueError:
+            bot.send_message(chat_id, "❌ Введите корректный ID.")
+        return
+    
+    if state == "waiting_add_topic":
+        if text in SEARCH_TOPICS:
+            bot.send_message(chat_id, f"⚠️ Тема '{text}' уже есть.")
+            return
+        SEARCH_TOPICS.append(text)
+        s = load_settings()
+        s["search_topics"] = SEARCH_TOPICS
+        save_settings(s)
+        update_global_settings()
+        del user_states[user_id]
+        bot.send_message(chat_id, f"✅ Тема '{text}' добавлена!", reply_markup=admin_menu())
+        return
+    
+    if state == "waiting_remove_topic":
+        if text not in SEARCH_TOPICS:
+            bot.send_message(chat_id, f"⚠️ Тема '{text}' не найдена.")
+            return
+        SEARCH_TOPICS.remove(text)
+        s = load_settings()
+        s["search_topics"] = SEARCH_TOPICS
+        save_settings(s)
+        update_global_settings()
+        del user_states[user_id]
+        bot.send_message(chat_id, f"✅ Тема '{text}' удалена!", reply_markup=admin_menu())
+        return
+    
+    if state == "waiting_max_subs":
+        try:
+            new_value = int(text)
             if new_value <= 0:
-                bot.send_message(chat_id, "❌ Число должно быть > 0.", reply_markup=admin_keyboard())
+                bot.send_message(chat_id, "❌ Число должно быть > 0.")
                 return
             s = load_settings()
             s["max_subscribers"] = new_value
             save_settings(s)
             update_global_settings()
-            bot.send_message(chat_id, f"✅ Макс. подписчиков: {new_value}", reply_markup=admin_keyboard())
+            del user_states[user_id]
+            bot.send_message(chat_id, f"✅ Макс. подписчиков: {new_value}", reply_markup=admin_menu())
         except ValueError:
-            bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
+            bot.send_message(chat_id, "❌ Введите корректное число.")
         return
     
-    if text.startswith("min "):
-        if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=admin_keyboard())
-            return
+    if state == "waiting_min_subs":
         try:
-            new_value = int(text.replace("min ", "").strip())
+            new_value = int(text)
             if new_value < 0:
-                bot.send_message(chat_id, "❌ Число должно быть >= 0.", reply_markup=admin_keyboard())
+                bot.send_message(chat_id, "❌ Число должно быть >= 0.")
                 return
             s = load_settings()
             s["min_subscribers"] = new_value
             save_settings(s)
             update_global_settings()
-            bot.send_message(chat_id, f"✅ Мин. подписчиков: {new_value}", reply_markup=admin_keyboard())
+            del user_states[user_id]
+            bot.send_message(chat_id, f"✅ Мин. подписчиков: {new_value}", reply_markup=admin_menu())
         except ValueError:
-            bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
+            bot.send_message(chat_id, "❌ Введите корректное число.")
         return
     
-    if text.startswith("er "):
-        if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=admin_keyboard())
-            return
+    if state == "waiting_min_er":
         try:
-            new_value = float(text.replace("er ", "").strip())
+            new_value = float(text)
             if new_value < 0:
-                bot.send_message(chat_id, "❌ Значение должно быть >= 0.", reply_markup=admin_keyboard())
+                bot.send_message(chat_id, "❌ Значение должно быть >= 0.")
                 return
             s = load_settings()
             s["min_engagement_rate"] = new_value
             save_settings(s)
             update_global_settings()
-            bot.send_message(chat_id, f"✅ Мин. ER: {new_value}%", reply_markup=admin_keyboard())
+            del user_states[user_id]
+            bot.send_message(chat_id, f"✅ Мин. ER: {new_value}%", reply_markup=admin_menu())
         except ValueError:
-            bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
+            bot.send_message(chat_id, "❌ Введите корректное число.")
         return
     
-    if text.startswith("growth "):
-        if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=admin_keyboard())
-            return
+    if state == "waiting_min_growth":
         try:
-            new_value = float(text.replace("growth ", "").strip())
+            new_value = float(text)
             if new_value < 0:
-                bot.send_message(chat_id, "❌ Значение должно быть >= 0.", reply_markup=admin_keyboard())
+                bot.send_message(chat_id, "❌ Значение должно быть >= 0.")
                 return
             s = load_settings()
             s["min_growth_rate"] = new_value
             save_settings(s)
             update_global_settings()
-            bot.send_message(chat_id, f"✅ Мин. рост: {new_value}%", reply_markup=admin_keyboard())
+            del user_states[user_id]
+            bot.send_message(chat_id, f"✅ Мин. рост: {new_value}%", reply_markup=admin_menu())
         except ValueError:
-            bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
+            bot.send_message(chat_id, "❌ Введите корректное число.")
         return
     
-    if text.startswith("inactive "):
-        if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=admin_keyboard())
-            return
+    if state == "waiting_max_inactive":
         try:
-            new_value = int(text.replace("inactive ", "").strip())
+            new_value = int(text)
             if new_value < 0:
-                bot.send_message(chat_id, "❌ Значение должно быть >= 0.", reply_markup=admin_keyboard())
+                bot.send_message(chat_id, "❌ Значение должно быть >= 0.")
                 return
             s = load_settings()
             s["max_days_inactive"] = new_value
             save_settings(s)
             update_global_settings()
-            bot.send_message(chat_id, f"✅ Макс. неактивность: {new_value} дн", reply_markup=admin_keyboard())
+            del user_states[user_id]
+            bot.send_message(chat_id, f"✅ Макс. неактивность: {new_value} дн", reply_markup=admin_menu())
         except ValueError:
-            bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
+            bot.send_message(chat_id, "❌ Введите корректное число.")
         return
     
-    if text.startswith("score "):
-        if not is_admin(user_id):
-            bot.send_message(chat_id, "❌ Только для создателя!", reply_markup=admin_keyboard())
-            return
+    if state == "waiting_min_score":
         try:
-            new_value = int(text.replace("score ", "").strip())
+            new_value = int(text)
             if new_value < 0 or new_value > 100:
-                bot.send_message(chat_id, "❌ Значение должно быть от 0 до 100.", reply_markup=admin_keyboard())
+                bot.send_message(chat_id, "❌ Значение должно быть от 0 до 100.")
                 return
             s = load_settings()
             s["min_score_for_top"] = new_value
             save_settings(s)
             update_global_settings()
-            bot.send_message(chat_id, f"✅ Мин. скор для ТОПа: {new_value}", reply_markup=admin_keyboard())
+            del user_states[user_id]
+            bot.send_message(chat_id, f"✅ Мин. скор для ТОПа: {new_value}", reply_markup=admin_menu())
         except ValueError:
-            bot.send_message(chat_id, "❌ Введите корректное число.", reply_markup=admin_keyboard())
+            bot.send_message(chat_id, "❌ Введите корректное число.")
         return
     
-    bot.send_message(chat_id, "Используйте кнопки меню:", reply_markup=main_keyboard())
+    bot.send_message(chat_id, "Используйте кнопки меню:", reply_markup=main_menu())
 
 # ================= ЗАПУСК =================
 if __name__ == "__main__":
@@ -1762,9 +1243,7 @@ if __name__ == "__main__":
     print(f"👤 ID создателя: {ALLOWED_USER_IDS[0] if ALLOWED_USER_IDS else 'Не задан'}")
     print(f"👥 Пользователей: {len(ALLOWED_USER_IDS)}")
     print(f"📌 Активные темы: {', '.join(SEARCH_TOPICS)}")
-    print(f"👥 Мин. подписчиков: {MIN_SUBSCRIBERS}")
-    print(f"👥 Макс. подписчиков: {MAX_SUBSCRIBERS}")
-    print(f"📈 Мин. ER: {MIN_ENGAGEMENT_RATE}%")
+    print(f"📊 Создаёт публичные таблицы с отчётами!")
     print("=" * 50)
     print("⏳ Ожидание команд...")
     
